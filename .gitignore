@@ -21,3 +21,6 @@ assets/images/modeles/*
 
 # Dump de la base en ligne (dossier dateactuel) — jamais versionné
 dateactuel/
+
+# Cache Python (scripts de test)
+__pycache__/

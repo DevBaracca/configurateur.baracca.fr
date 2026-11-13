@@ -907,6 +907,8 @@ function buildExport(d, env) {
           })),
         })), // un revêtement de toiture + un intérieur + des fenêtres de toit par pent de chaque module
         epaisseur: +(+(toitureDef.epaisseur ?? 0.30)).toFixed(3),
+        // débord de toiture (m) : champ client, sinon forme (back-office), sinon épaisseur
+        depassee: +(Math.max(0, +(d.depassee ?? formeDef?.depassee ?? +(toitureDef.epaisseur ?? 0.30) * 100)) / 100).toFixed(3),
         pente: toitType === "terrasse" ? null : pente1Of(d), // pente du versant 1
         pente2: toitType === "deuxpentes" ? pente2Of(d) : null, // pente du versant 2 (deux pentes)
         pignon: toitType === "deuxpentes" ? true : toitType === "quatrepentes" ? false : null,
@@ -1989,6 +1991,7 @@ export default function App() {
   const [saveName, setSaveName] = useState("");
   const [configMsg, setConfigMsg] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [soumResult, setSoumResult] = useState(null); // retour affiché DANS la pop-up Soumettre : null | { ok, warn, msg }
 
   const set = (patch) => setD((prev) => ({ ...prev, ...patch }));
   /* Bascule mur/charpente d'une arête — sur un côté commun, les deux côtés
@@ -2662,6 +2665,7 @@ export default function App() {
   // Bouton « Soumettre » : envoie la configuration à Baracca
   const soumettre = async () => {
     setSubmitting(true);
+    setSoumResult(null);
     try {
       const r = await fetch(API_SOUMETTRE, {
         method: "POST",
@@ -2670,13 +2674,21 @@ export default function App() {
       });
       const g = await r.json();
       if (g.ok) {
-        notifier(g.mail === false
+        const warn = g.mail === false;
+        const msg = warn
           ? "Dossier enregistré, mais la notification e-mail a échoué"
-          : "Dossier soumis — l'architecte est averti ✓");
+          : "Dossier soumis — l'architecte est averti par e-mail ✓";
+        setSoumResult({ ok: true, warn, msg });
+        notifier(msg);
+        // la pop-up se ferme toute seule après la confirmation
+        setTimeout(() => { setSoumettreOpen(false); setSoumResult(null); }, 2500);
       } else {
-        notifier(g.error || "Échec de la soumission");
+        const msg = g.error || "Échec de la soumission";
+        setSoumResult({ ok: false, warn: false, msg });
+        notifier(msg);
       }
     } catch {
+      setSoumResult({ ok: false, warn: false, msg: "Échec de la soumission (réseau)" });
       notifier("Échec de la soumission");
     }
     setSubmitting(false);
@@ -2793,12 +2805,24 @@ export default function App() {
               <button
                 className="btn primary"
                 onClick={soumettre}
-                disabled={submitting || !session?.loggedIn}
+                disabled={submitting || !session?.loggedIn || soumResult?.ok}
                 title={session?.loggedIn ? "Avertir l'architecte (dev@baracca.fr) que ce dossier est prêt à être examiné" : "Connectez-vous pour soumettre"}
               >
-                {submitting ? "Envoi…" : "Soumettre"}
+                {submitting ? "Envoi…" : soumResult?.ok ? "Envoyé ✓" : "Soumettre"}
               </button>
             </div>
+            {soumResult && (
+              <div
+                className="field-error"
+                style={{
+                  marginTop: 10,
+                  fontWeight: 600,
+                  color: soumResult.ok ? (soumResult.warn ? "#b45309" : "#059669") : "#dc2626",
+                }}
+              >
+                {soumResult.msg}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -2994,7 +3018,7 @@ export default function App() {
       </div>
       <div className="side-col">
       {/* Bouton Soumettre en haut de la colonne de droite (niveau du plan) : clic = pop-up centrée */}
-      <button type="button" className="action-btn action-btn-block" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); const w = window.innerWidth || 1200; setSoumPos({ x: Math.max(8, Math.min((w - 400) / 2, w - 416)), y: r.bottom + 20 }); setSoumettreOpen(true); }} title="Ouvrir la fenêtre Soumettre">Soumettre</button>
+      <button type="button" className="action-btn action-btn-block" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); const w = window.innerWidth || 1200; setSoumPos({ x: Math.max(8, Math.min((w - 400) / 2, w - 416)), y: r.bottom + 20 }); setSoumResult(null); setSoumettreOpen(true); }} title="Ouvrir la fenêtre Soumettre">Soumettre</button>
       <div className={"card panel-card" + (reglagesOpen ? " deplie" : "")}>
         <div className="card-title card-toggle" onClick={() => setReglagesOpen((o) => !o)} title={reglagesOpen ? "Replier les réglages généraux" : "Ouvrir les réglages généraux"}>
           <span className={"carac-arrow" + (reglagesOpen ? " open" : "")}></span>

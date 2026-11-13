@@ -22,11 +22,22 @@ function archicad_add_soumission(array $configuration, array $user): ?array
     if (!is_dir(archicad_soumissions_dir())) {
         mkdir(archicad_soumissions_dir(), 0775, true);
     }
-    $nom = preg_replace('/[^A-Za-z0-9_-]/', '_', (string) ($configuration['module']['nom'] ?? 'module'));
-    $fichier = date('Ymd_His') . '_' . (string) $user['id'] . '_' . $nom . '.json';
+    // Nom de fichier lisible : <nom-du-module>-<prénom-nom-du-client>-<date>.json
+    // (ex. Module-T3-Dupont-Jean-20261113_133005.json) — le tri chronologique des
+    // soumissions s'appuie sur le champ « soumis_le », pas sur le nom de fichier.
+    $slug = function (string $s, string $fallback): string {
+        $s = trim((string) preg_replace('/[^A-Za-z0-9_-]+/', '-', $s), '-');
+        $s = trim(mb_substr($s, 0, 40), '-');
+        return $s !== '' ? $s : $fallback;
+    };
+    $nomModule = $slug((string) ($configuration['module']['nom'] ?? 'module'), 'module');
+    $prenom = $slug((string) ($user['prenom'] ?? ''), '');
+    $nomUser = $slug((string) ($user['nom'] ?? ''), 'client');
+    $qui = trim(($prenom !== '' ? $prenom . '-' : '') . $nomUser, '-');
+    $fichier = $nomModule . '-' . $qui . '-' . date('Ymd_His') . '.json';
     // Évite l'écrasement si deux soumissions identiques dans la même seconde
     if (is_file(archicad_soumissions_dir() . '/' . $fichier)) {
-        $fichier = date('Ymd_His') . '_' . (string) $user['id'] . '_' . $nom . '-' . bin2hex(random_bytes(3)) . '.json';
+        $fichier = $nomModule . '-' . $qui . '-' . date('Ymd_His') . '-' . bin2hex(random_bytes(3)) . '.json';
     }
     $record = [
         'soumis_le' => date('Y-m-d H:i:s'),
@@ -71,9 +82,10 @@ function archicad_load_soumissions(): array
             'donnees' => $data,
         ];
     }
-    // Le préfixe Ymd_His du nom de fichier permet un tri chronologique
+    // Tri chronologique sur le champ « soumis_le » (le nom de fichier est lisible,
+    // il ne sert plus de clé de tri)
     usort($out, function ($a, $b) {
-        return strcmp($b['fichier'], $a['fichier']);
+        return strcmp((string) $b['soumis_le'], (string) $a['soumis_le']);
     });
     return $out;
 }
