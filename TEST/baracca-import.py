@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# BARACCA-IMPORT v2.11 — vérifiez la présence de cette ligne : elle prouve
+# BARACCA-IMPORT v2.10 — vérifiez la présence de cette ligne : elle prouve
 # que vous exécutez bien la dernière version du script.
-# v2.11 : deux pentes -> UN toit multi-plans par niveau et par module :
-# polygone = LIGNE DIRECTRICE, débords d'arête natifs (pivotEdges via
-# ModifyRoofs, appel séparé car CreateRoofs les refuse sur Tapir 2.0.0) et
-# pignons de rive (angleType "Gable" sur les arêtes est/ouest libres).
-# Les murs pignons restent à hauteur H (plus de TrimElements : il supprimait
-# les murs) -> le triangle de pignon est le panneau de rive du toit, les murs
-# restent visibles en 3D. Niveau couverture = H + épaisseur du complexe
+# v2.10 : toitures en multi-plans par niveau avec débords d'arête natifs
+# (pivotEdges, Tapir >= 2.0) : le polygone reste la LIGNE DIRECTRICE et
+# Archicad calcule le contour -> hauteur identique au droit des murs, même
+# aux jonctions entre modules ; niveau couverture = H + épaisseur du complexe
 # (toit.epaisseur du configurateur). Repli v2.9 (versants monoplanes, angle
-# = -angle car le miroir Y inverse le sens de rotation) si CreateRoofs refuse
-# "levels".
+# = -angle car le miroir Y inverse le sens de rotation, pivot sur la ligne
+# directrice, polygone étendu) si CreateRoofs refuse levels/pivotEdges.
+# Pignons : murs est/ouest libres montés au faîtage, taillés par la couverture
+# (TrimElements, section 3b).
 # v2.9 : ligne de référence = face INTÉRIEURE, compatible Tapir 1.7.2 :
 # CreateWalls y refuse le champ "flipped", donc on inverse le SENS de tracé
 # de chaque mur (beg<->end) + referenceLineLocation "Inside" — avec la
@@ -117,6 +116,15 @@ LAYER = "BARACCA_Modules"
 # l'EXTÉRIEUR du bâtiment. Pas de champ "flipped" : refusé par le schéma
 # CreateWalls de Tapir 1.7.2 (additionalProperties).
 WALL_REFERENCE_LINE_LOCATION = "Inside"
+
+# Découpe des pignons par la couverture :
+# - TRIM_TYPE = None (défaut) : TrimElements SANS trimmingElement, le toit de
+#   couverture dans "elements" -> ACAPI_Element_Trim_Elements, trim standard
+#   "tailler sous toiture" qui élimine ce qui est HORS du toit, donc garde la
+#   partie du mur SOUS les pans -> triangle de pignon.
+# - TRIM_TYPE = "KeepInside"/"KeepOutside" : forme manuelle avec
+#   trimmingElement + trimType (à n'utiliser que si le trim auto ne convient pas).
+TRIM_TYPE = None
 
 def guid_of(element_id):
     """Normalise un elementId Tapir (objet {"guid": ...} ou chaîne) en guid."""
@@ -515,40 +523,48 @@ def import_module(data, pick_origin=False):
             _c = cle_mur(_f, _seg)
             cle_count[_c] = cle_count.get(_c, 0) + 1
 
-    # Pignons (deux pentes à pignon) PAR MODULE (v2.11) : le triangle de pignon
-    # est formé par le PANNEAU DE rive (angleType "Gable") de la toiture du
-    # module sur chaque côté est/ouest LIBRE (non partagé) — voir section 3.
-    # Les murs pignons eux-mêmes restent à la hauteur normale H du module :
-    # on ne les monte pas au faîtage et on ne les découpe pas (TrimElements
-    # supprimait les murs chez certains Tapir) — ils restent donc visibles en 3D.
-    # Côté rive en charpente (pas de mur), on crée le mur de pignon à hauteur H.
+    # Pignons (deux pentes à pignon) PAR MODULE : chaque côté est/ouest
+    # LIBRE d'un module (mur non partagé, ou rive en charpente) monte jusqu'au
+    # faîtage de SA toiture ; la couverture le taille en triangle (découpe
+    # TrimElements en section 3b).
+    pignon_cles = {}   # uid -> [clés de murs pignons de ce module]
     if geo == "deuxpentes" and pignon:
         for unite, segments in segments_par_unite:
+            uid = unite.get("id", "m0")
             dims_u = unite["dimensions"]
             L_u = float(dims_u["longueur"])
             l_u = float(dims_u["largeur"])
             H_u = float(dims_u["hauteur"])
+            hf_u = math.tan(math.radians(pente)) * l_u / 2.0
             bx = float(unite.get("x", 0.0))
             by = float(unite.get("y", 0.0))
             for face_key, x in (("ouest", bx), ("est", bx + L_u)):
                 seg = segments.get(face_key)
                 if seg is not None:
-                    continue          # mur existant : rien à faire
-                # rive en charpente : on crée le mur de pignon à hauteur H
-                ref = next((segments[f] for f in ("nord", "sud")
-                            if segments.get(f)), None)
-                ep = ref["epaisseur"] if ref else 0.14
-                type_mur = (ref or {}).get("type") or next(
-                    (f.get("type", "") for f in module.get("murs", {}).values()
-                     if isinstance(f, dict) and f.get("actif")), "Mur")
-                if face_key == "est":
-                    beg, end = (x, by + l_u), (x, by)
+                    cle = alias[(uid, face_key)]
+                    if cle_count.get(cle, 0) > 1:
+                        continue          # mur partagé : pas de pignon
+                    canon[cle]["hauteur"] = H_u + hf_u
+                    canon[cle]["pignon"] = True
+                    pignon_cles.setdefault(uid, []).append(cle)
                 else:
-                    beg, end = (x, by), (x, by + l_u)
-                pseg = {"face": face_key, "beg": beg, "end": end,
-                        "hauteur": H_u, "epaisseur": ep,
-                        "type": type_mur, "ouvertures": [], "pignon": True}
-                canon[cle_mur(face_key, pseg)] = pseg
+                    # rive en charpente : on crée le mur de pignon à fond
+                    ref = next((segments[f] for f in ("nord", "sud")
+                                if segments.get(f)), None)
+                    ep = ref["epaisseur"] if ref else 0.14
+                    type_mur = (ref or {}).get("type") or next(
+                        (f.get("type", "") for f in module.get("murs", {}).values()
+                         if isinstance(f, dict) and f.get("actif")), "Mur")
+                    if face_key == "est":
+                        beg, end = (x, by + l_u), (x, by)
+                    else:
+                        beg, end = (x, by), (x, by + l_u)
+                    pseg = {"face": face_key, "beg": beg, "end": end,
+                            "hauteur": H_u + hf_u, "epaisseur": ep,
+                            "type": type_mur, "ouvertures": [], "pignon": True}
+                    pcle = cle_mur(face_key, pseg)
+                    canon[pcle] = pseg
+                    pignon_cles.setdefault(uid, []).append(pcle)
 
     walls_data = []
     types_sans_favori = set()
@@ -621,34 +637,30 @@ def import_module(data, pick_origin=False):
         print(f"  ! Plancher(s) non créé(s) : {errs}")
 
     # --- 3. Toitures (PAR module, superposées : complexe + couverture) ------
-    # v2.11, deux pentes : UN toit multi-plans par niveau et par module :
-    #   - polygone = LIGNE DIRECTRICE du module (jamais étendu) ;
-    #   - niveau complexe = H ; niveau couverture = H + épaisseur du complexe
-    #     lue dans le configurateur (toit.epaisseur) ;
-    #   - débords d'arête (pivotEdges/eavesOverhang) appliqués dans un appel
-    #     ModifyRoofs SÉPARÉ (CreateRoofs refuse pivotEdges sur Tapir 2.0.0) :
-    #     débord = depassee + épaisseur de mur côté libre, 0 côté partagé ;
-    #     arêtes est/ouest libres = pignon de rive (angleType "Gable").
-    #   -> la ligne de référence ne bouge pas : hauteur identique au droit des
-    #   murs, même aux jonctions entre deux modules.
-    # Repli (Tapir sans "levels" dans CreateRoofs) : versants monoplanes,
-    # pivot sur la ligne directrice, polygone étendu du débord, angle = -angle
-    # (le miroir Y inverse le sens de rotation).
+    # - complexe de toiture : empreinte sur la LIGNE DIRECTRICE, niveau H ;
+    # - couverture (toit avec débords) : empreinte élargie, au-dessus (niveau
+    #   H + épaisseur du complexe). Le débord est compté depuis la face
+    #   EXTÉRIEURE du mur (v2.7 : débord + épaisseur de mur) ; pas de débord
+    #   sur les côtés communs à deux modules accolés.
     angle = round(math.radians(pente), 6)   # pente en RADIANS (convention API)
-    ep_toit = float(toit.get("epaisseur") or 0.30)   # épaisseur du complexe (configurateur)
-    deb = float(toit.get("depassee") or ep_toit)     # débord de toiture (m)
+    ep_toit = float(toit.get("epaisseur") or 0.30)
+    deb = float(toit.get("depassee") or ep_toit)   # débord de toiture (m)
     print(f"Création des toitures ({toit.get('type', geo)} / {geo}"
           f"{', pignon' if pignon else ''}, {len(unites)} module(s), "
           f"complexe + couverture, débord {deb:.2f} m + épaisseur de mur)…")
 
     roofs_data = []
-    roof_meta = []   # parallèle de roofs_data : (uid, est_couverture)
-    roofs_pe = []    # pivotEdges à appliquer par ModifyRoofs (mode multi-plans), sinon None
+    roof_meta = []   # parallèle de roofs_data : (uid, level, est_couverture)
 
     def build_roofs(use_multi):
+        """Construit roofs_data / roof_meta.
+        use_multi (deux pentes, Tapir >= 2.0) : UN toit multi-plans par niveau,
+        polygone = LIGNE DIRECTRICE, débords définis par arête via pivotEdges
+        -> Archicad calcule le contour sans déplacer la ligne de référence.
+        Sinon : versants monoplanes (v2.9), pivot sur la ligne directrice et
+        polygone étendu du débord."""
         roofs_data.clear()
         roof_meta.clear()
-        roofs_pe.clear()
         for unite, segments in segments_par_unite:
             uid = unite.get("id", "m0")
             dims_u = unite["dimensions"]
@@ -658,9 +670,9 @@ def import_module(data, pick_origin=False):
             bx, by = float(unite.get("x", 0.0)), float(unite.get("y", 0.0))
 
             def cote(face_key, segments=segments):
-                """Débord de la couverture sur ce côté, compté depuis la face
-                extérieure du mur = depassee + épaisseur du mur. Côté partagé
-                entre deux modules accolés : 0 (pas de débord)."""
+                """Élargissement de la couverture sur ce côté : débord compté
+                depuis la face extérieure du mur = depassee + épaisseur du mur.
+                Côté partagé entre deux modules accolés : 0 (pas de débord)."""
                 seg = segments.get(face_key)
                 if seg is None:
                     return deb + 0.255      # rive en charpente : débord + ép. mur
@@ -676,41 +688,48 @@ def import_module(data, pick_origin=False):
             y0, y1 = by - dN, by + l + dS
             emp_v = [tr((x0, y0)), tr((x1, y0)), tr((x1, y1)), tr((x0, y1))]
 
-            if geo == "deuxpentes" and use_multi:
-                # UN toit multi-plans par niveau. Polygone = ligne directrice.
-                # Arêtes du polygone pivot : 0=nord, 1=est, 2=sud, 3=ouest.
-                faces = ("nord", "est", "sud", "ouest")
-                for lvl, ovs, couv in ((H, (0.0, 0.0, 0.0, 0.0), False),
-                                       (H + ep_toit, (dN, dE, dS, dO), True)):
-                    pe = []
-                    for i, face in enumerate(faces):
-                        li = {"eavesOverhang": ovs[i]}
-                        if pignon and face in ("est", "ouest"):
-                            seg = segments.get(face)
-                            shared = (seg is not None
-                                      and cle_count.get(cle_mur(face, seg), 0) > 1)
-                            li["angleType"] = "Sloped" if shared else "Gable"
-                        pe.append({"levels": [li]})
-                    roofs_data.append({
-                        "level": lvl,
-                        "polygonCoordinates": emp_c,
-                        "levels": [{"levelHeight": 0.0, "levelAngle": angle}],
-                    })
-                    roof_meta.append((uid, couv))
-                    roofs_pe.append(pe)
-            else:
-                # Repli v2.9 : versants monoplanes, pivot sur la LIGNE
-                # DIRECTRICE, polygone étendu du débord, angle = -angle.
-                def add_roof(level, poly, with_angle, pivot=None, est_couv=False):
-                    r = {"level": level, "polygonCoordinates": poly}
+            def add_roof(level, poly, with_angle, pivot=None, est_couv=False,
+                         multi=None):
+                r = {"level": level, "polygonCoordinates": poly}
+                if multi is not None:
+                    r["levels"] = multi["levels"]
+                    r["pivotEdges"] = multi["pivotEdges"]
+                else:
                     if pivot is not None:
                         r["pivotLine"] = pivot
                     if with_angle:
-                        r["angle"] = -angle   # miroir Y -> angle opposé
-                    roofs_data.append(r)
-                    roof_meta.append((uid, est_couv))
-                    roofs_pe.append(None)
+                        # v2.7/v2.10 : le miroir Y inverse le sens de rotation
+                        r["angle"] = -angle
+                roofs_data.append(r)
+                roof_meta.append((uid, level, est_couv))
 
+            if geo == "deuxpentes" and use_multi:
+                # v2.10 : un toit multi-plans par niveau. Le polygone reste la
+                # LIGNE DIRECTRICE ; les débords sont des débords d'arête
+                # (pivotEdges) -> la ligne de référence ne bouge pas, donc la
+                # hauteur au droit des murs est la même avec ou sans débord,
+                # y compris aux jonctions entre modules (côté partagé = 0).
+                # Niveau de la couverture = H + épaisseur du complexe de
+                # toiture lue dans le configurateur (toit.epaisseur).
+                # Arêtes du polygone pivot : 0=nord, 1=est, 2=sud, 3=ouest.
+                for lvl, ovs, couv in ((H, (0.0, 0.0, 0.0, 0.0), False),
+                                       (H + ep_toit, (dN, dE, dS, dO), True)):
+                    pe = []
+                    for i, ov in enumerate(ovs):
+                        li = {"eavesOverhang": ov}
+                        if pignon and i in (1, 3):   # arêtes est/ouest = pignon
+                            li["angleType"] = "Gable"
+                        pe.append({"levels": [li]})
+                    add_roof(lvl, emp_c, False, est_couv=couv,
+                             multi={"levels": [{"levelHeight": 0.0,
+                                                "levelAngle": angle}],
+                                    "pivotEdges": pe})
+            else:
+                # v2.9 : pivot des versants posé sur la LIGNE DIRECTRICE (bord du
+                # rectangle de base), jamais sur le polygone étendu ; le débord
+                # prolonge seulement le polygone, la pente continue au-delà du
+                # mur -> hauteurs identiques au droit des murs, même aux
+                # jonctions entre modules.
                 piv_n = {"begCoordinate": tr((bx, by)),
                          "endCoordinate": tr((bx + L, by))}
                 piv_s = {"begCoordinate": tr((bx + L, by + l)),
@@ -737,14 +756,17 @@ def import_module(data, pick_origin=False):
         roof_response = bridge.tapir("CreateRoofs",
                                      {"roofsData": roofs_data})
     except Exception:
-        if any("levels" in r for r in roofs_data):
-            # Tapir sans "levels" dans CreateRoofs -> repli versants monoplanes
-            print("  ! Toits multi-plans (levels) refusés par ce Tapir : "
+        if any("levels" in r or "pivotEdges" in r for r in roofs_data):
+            # Tapir < 2.0 : CreateRoofs refuse levels/pivotEdges -> repli v2.9
+            # (versants monoplanes, pivot sur la ligne directrice).
+            print("  ! Toits multi-plans avec pivotEdges refusés par ce Tapir : "
                   "repli sur versants monoplanes (pivot sur la ligne directrice).")
             build_roofs(use_multi=False)
             roof_response = bridge.tapir("CreateRoofs",
                                          {"roofsData": roofs_data})
         elif any("angle" in r for r in roofs_data):
+            # Repli : cette version de Tapir n'accepte pas 'angle' en
+            # multi-plans -> pente par défaut de l'outil Toiture.
             for r in roofs_data:
                 r.pop("angle", None)
             print("  ! Champ 'angle' refusé en multi-plans : toitures "
@@ -758,26 +780,42 @@ def import_module(data, pick_origin=False):
     if errs:
         print(f"  ! Toiture(s) non créée(s) : {errs}")
     else:
-        print(f"  Toitures créées ({len(roofs_data)} toit(s) : complexe + couverture par module).")
+        print(f"  Toitures créées ({len(roofs_data)} plans : complexe + couverture par module).")
 
-    # --- 3b. Débords d'arête + pignons de rive via ModifyRoofs (pivotEdges) --
-    # Appel séparé : CreateRoofs refuse pivotEdges (Tapir 2.0.0). La ligne de
-    # référence (polygone pivot) ne bouge pas, Archicad calcule le contour.
+    # --- 3b. Découpe des pignons par la couverture ---------------------------
+    # Trim par défaut (TRIM_TYPE = None) : le toit de couverture est mis dans
+    # "elements" avec les murs pignons -> ACAPI_Element_Trim_Elements, qui
+    # élimine la partie HORS du toit : on garde le mur SOUS les pans ->
+    # triangle de pignon avec débord.
     roof_elements = roof_response.get("elements", [])
-    if any(pe is not None for pe in roofs_pe) and len(roof_elements) == len(roofs_data):
-        details = []
-        for pe, rel in zip(roofs_pe, roof_elements):
-            if pe is None or rel.get("error") or rel.get("elementId") is None:
-                continue
-            details.append({"elementId": rel["elementId"], "pivotEdges": pe})
-        if details:
-            try:
-                bridge.tapir("ModifyRoofs", {"roofsWithDetails": details})
-                print(f"  Débords d'arête + pignons de rive appliqués "
-                      f"({len(details)} toit(s), ModifyRoofs pivotEdges).")
-            except Exception as exc:
-                print(f"  ! ModifyRoofs pivotEdges refusé ({exc}) : débords et "
-                      f"pignons de rive non appliqués (toits créés sans débord).")
+    if pignon_cles and len(roof_elements) == len(roofs_data):
+        n_trim = 0
+        try:
+            for (uid, level, couv), rel in zip(roof_meta, roof_elements):
+                if not couv or rel.get("error") or rel.get("elementId") is None:
+                    continue
+                cles = [c for c in pignon_cles.get(uid, []) if c in wall_ids]
+                if not cles:
+                    continue
+                if TRIM_TYPE:
+                    bridge.tapir("TrimElements", {
+                        "elements": [{"elementId": wall_ids[c]} for c in cles],
+                        "trimmingElement": {"guid": guid_of(rel["elementId"])},
+                        "trimType": TRIM_TYPE,
+                    })
+                else:
+                    bridge.tapir("TrimElements", {
+                        "elements": ([{"elementId": wall_ids[c]} for c in cles]
+                                     + [{"elementId": rel["elementId"]}]),
+                    })
+                n_trim += 1
+            if n_trim:
+                print(f"  Pignons taillés sous la couverture ({n_trim} appel(s) TrimElements).")
+        except Exception as exc:
+            print(f"  ! TrimElements indisponible ({exc}) : pignons laissés "
+                  f"à hauteur de faîtage, à tailler manuellement sous la toiture.")
+    elif pignon_cles:
+        print("  ! Toitures sans elementId retourné : découpe des pignons ignorée.")
 
     # --- 4. Ouvertures (de chaque instance, sur le mur canonique) ----------
     n_ok, n_err = 0, 0
@@ -844,13 +882,13 @@ def main():
     parser = argparse.ArgumentParser(
         description="Importe un module Baracca (JSON du configurateur web) "
                     "dans le projet Archicad ouvert.")
-    print("BARACCA-IMPORT v2.11 — enveloppe déballée, toutes les instances, "
+    print("BARACCA-IMPORT v2.10 — enveloppe déballée, toutes les instances, "
           "murs partagés dédoublonnés (arrondi cm), miroir Y (Nord correct), "
-          "pignons de rive natifs du toit (angleType Gable, murs pignons à "
-          "hauteur H non découpés), plancher par module, toitures multi-plans "
-          "complexe + couverture (débords par arête pivotEdges via ModifyRoofs, "
-          "ligne directrice fixe, repli v2.9 versants) ; ligne de référence sur "
-          "la face intérieure (Inside, sens inversés)")
+          "pignons par module taillés par la couverture (TrimElements), "
+          "plancher par module, toitures superposées complexe + couverture "
+          "(débords par arête pivotEdges si Tapir >= 2.0, sinon versants avec "
+          "pivot sur la ligne directrice) ; ligne de référence sur la face "
+          "intérieure (Inside, sens inversés)")
     parser.add_argument("fichier", nargs="?", help="Chemin du JSON du module")
     parser.add_argument("--pick", action="store_true",
                         help="Choisir l'origine du module en cliquant")
