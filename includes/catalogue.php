@@ -245,10 +245,10 @@ function archicad_catalogue_defaults(string $kind): array
             // élévations, épaisseur (m), tarif au m², favori Archicad.
             // Onglet « Extérieur » du back-office.
             return [
-                ['id' => 'bardage_bois', 'nom' => 'Bardage bois', 'image' => '', 'epaisseur' => 0.02, 'favori' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'enduit', 'nom' => 'Enduit minéral', 'image' => '', 'epaisseur' => 0.015, 'favori' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'tole', 'nom' => 'Tôle nervurée', 'image' => '', 'epaisseur' => 0.005, 'favori' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'brique', 'nom' => 'Brique de parement', 'image' => '', 'epaisseur' => 0.09, 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'bardage_bois', 'nom' => 'Bardage bois', 'image' => '', 'epaisseur' => 0.02, 'rgb' => [150, 111, 77], 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'enduit', 'nom' => 'Enduit minéral', 'image' => '', 'epaisseur' => 0.015, 'rgb' => [226, 220, 208], 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'tole', 'nom' => 'Tôle nervurée', 'image' => '', 'epaisseur' => 0.005, 'rgb' => [120, 126, 132], 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'brique', 'nom' => 'Brique de parement', 'image' => '', 'epaisseur' => 0.09, 'rgb' => [150, 74, 52], 'favori' => '', 'tarif' => 0, 'created' => $today],
             ];
         case 'interieurs':
             // Revêtements INTÉRIEURS (murs + sous-face de toiture), onglet
@@ -256,9 +256,9 @@ function archicad_catalogue_defaults(string $kind): array
             // tarif est ajouté au chiffrage des murs et du complexe de
             // toiture, favori Archicad.
             return [
-                ['id' => 'placo_ba13', 'nom' => 'Placo BA13 + peinture', 'image' => '', 'epaisseur' => 0.013, 'favori' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'lambris_bois', 'nom' => 'Lambris bois', 'image' => '', 'epaisseur' => 0.02, 'favori' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'lambris_pvc', 'nom' => 'Lambris PVC', 'image' => '', 'epaisseur' => 0.01, 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'placo_ba13', 'nom' => 'Placo BA13 + peinture', 'image' => '', 'epaisseur' => 0.013, 'rgb' => [240, 238, 234], 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'lambris_bois', 'nom' => 'Lambris bois', 'image' => '', 'epaisseur' => 0.02, 'rgb' => [196, 164, 124], 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'lambris_pvc', 'nom' => 'Lambris PVC', 'image' => '', 'epaisseur' => 0.01, 'rgb' => [228, 228, 226], 'favori' => '', 'tarif' => 0, 'created' => $today],
             ];
         case 'couvertures':
             // Couvertures de TOITURE (revêtement de toiture, choisi par pent),
@@ -266,10 +266,10 @@ function archicad_catalogue_defaults(string $kind): array
             // appliqué à la surface AVEC débords (ligne « Couverture » du
             // chiffrage), favori Archicad.
             return [
-                ['id' => 'bardeaux_bois', 'nom' => 'Bardeaux bois', 'image' => '', 'epaisseur' => 0.04, 'favori' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'joint_debout', 'nom' => 'Tôle joint debout', 'image' => '', 'epaisseur' => 0.005, 'favori' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'tuiles_terre_cuite', 'nom' => 'Tuiles terre cuite', 'image' => '', 'epaisseur' => 0.05, 'favori' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'epdm', 'nom' => 'Membrane EPDM (terrasse)', 'image' => '', 'epaisseur' => 0.005, 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'bardeaux_bois', 'nom' => 'Bardeaux bois', 'image' => '', 'epaisseur' => 0.04, 'rgb' => [146, 100, 62], 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'joint_debout', 'nom' => 'Tôle joint debout', 'image' => '', 'epaisseur' => 0.005, 'rgb' => [96, 104, 112], 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'tuiles_terre_cuite', 'nom' => 'Tuiles terre cuite', 'image' => '', 'epaisseur' => 0.05, 'rgb' => [158, 72, 48], 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'epdm', 'nom' => 'Membrane EPDM (terrasse)', 'image' => '', 'epaisseur' => 0.005, 'rgb' => [52, 54, 56], 'favori' => '', 'tarif' => 0, 'created' => $today],
             ];
         case 'toitures':
             // Rubrique toiture : épaisseur (m) dessinée au-dessus de la ligne
@@ -413,6 +413,16 @@ function archicad_load_catalogue(string $kind): array
         }
         if (!array_key_exists('image', $item)) {
             $items[$i]['image'] = '';
+        }
+    }
+    if (in_array($kind, ['surfaces', 'interieurs', 'couvertures'], true)) {
+        // Couleur par défaut du revêtement, affichée quand aucun visuel n'est
+        // téléversé (comme le rgb des murs / toitures / charpentes)
+        $rgbDefaut = ['surfaces' => [158, 158, 158], 'interieurs' => [235, 230, 220], 'couvertures' => [120, 113, 108]][$kind];
+        foreach ($items as $i => $item) {
+            if (empty($item['rgb']) || !is_array($item['rgb'])) {
+                $items[$i]['rgb'] = $rgbDefaut;
+            }
         }
     }
     $items = archicad_catalogue_normalize_defaut($kind, $items);

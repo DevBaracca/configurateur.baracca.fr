@@ -1,7 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# BARACCA-IMPORT v2.26 — vérifiez la présence de cette ligne : elle prouve
+# BARACCA-IMPORT v2.28 — vérifiez la présence de cette ligne : elle prouve
 # que vous exécutez bien la dernière version du script.
+# v2.28 : jonction des toitures entre modules accolés détectée par l'ÉCART entre
+# lignes directrices (comme la 3D), est/ouest = amont recouvre l'écart / aval à
+# 0, nord/sud = moitié chacun ; baies libres dans les revêtements mesurées depuis
+# l'axe propre de la couche (plus de décalage d'épaisseur de mur) ; revêtement
+# INTÉRIEUR non rallongé aux angles (seul l'extérieur l'est) ; ancres des fenêtres
+# de toit calées en z sur le plan de chaque couche (plus de décalage de hauteur
+# entre complexe et revêtements) ; charpente dédoublonnée aux intersections.
+# v2.27 : favoris trous BARACCA-BAIELIBRE / BARACCA-LUCARNEVIDE ; hauteurs de
+# toiture selon le plan d'inclinaison (delta / cos(pente)) ; dalle de
+# revêtement de plancher au niveau de sa propre épaisseur (level = face
+# haute) ; revêtements de mur prolongés d'une épaisseur de mur aux angles ;
+# option « pas de revêtement » (id "none" -> couche non créée).
 # v2.26 : la géométrie de référence = couche MUR / COMPLEXE / PLANCHER.
 # Revêtement intérieur décalé d'ep vers l'INTÉRIEUR de la ligne ; revêtement
 # extérieur au-delà de ligne + épaisseur mur/complexe ; revêtement de plancher
@@ -179,9 +191,11 @@ FAVORIS_OUVERTURES = {
 }
 FAVORIS_TOITURE = {}      # repli si l'export n'a pas de champ « favori »
 # Favori Archicad « baie libre » (ouverture sans menuiserie) utilisé pour les
-# ouvertures équivalentes créées dans les couches de revêtement (v2.26).
-# Laissez '' pour utiliser le réglage par défaut de l'outil (baie vide).
-FAVORI_BAIE_LIBRE = "Baracca — Baie libre"
+# ouvertures équivalentes créées dans les couches de revêtement de MUR (v2.26),
+# et « lucarne vide » pour les fenêtres de toit dans les revêtements de TOITURE.
+# Laissez '' pour utiliser le réglage par défaut de l'outil.
+FAVORI_BAIE_LIBRE = "BARACCA-BAIELIBRE"
+FAVORI_LUCARNE_VIDE = "BARACCA-LUCARNEVIDE"
 FAVORIS_CHARPENTE = {}    # idem pour poteaux/poutres
 
 
@@ -624,13 +638,13 @@ def ouverture_centre(unite, face_key, ouv):
 
 def debord_plancher(module):
     """Débord du plancher de chaque côté (dL, dl), lu dans l'export (plancher
-    en objet) ; défaut 0,217 m (constante PLANCHER_DEPASSEMENT du configurateur)."""
+    en objet) ; défaut 0,157 m (constante PLANCHER_DEPASSEMENT du configurateur)."""
     pl = module.get("plancher")
     dims = module.get("dimensions", {})
     if isinstance(pl, dict) and pl.get("longueur") and pl.get("largeur"):
         return (max(0.0, (float(pl["longueur"]) - float(dims.get("longueur", 0.0))) / 2.0),
                 max(0.0, (float(pl["largeur"]) - float(dims.get("largeur", 0.0))) / 2.0))
-    return (0.217, 0.217)
+    return (0.157, 0.157)
 
 
 # ---------------------------------------------------------------------------
@@ -929,12 +943,16 @@ def import_module(data, pick_origin=False):
     def axes_envoi(seg):
         return axes_envoi_pt(seg["beg"], seg["end"])
 
-    print(f"Création de {len(canon)} mur(s) sur {len(unites)} module(s)…")
+    _avec_couches = sum(1 for s in canon.values() if len(s.get("couches") or []) > 1)
+    print(f"Création de {len(canon)} mur(s) sur {len(unites)} module(s)… "
+          f"({_avec_couches} avec pile de couches, "
+          f"{len(canon) - _avec_couches} sans champ « couches » -> 1 couche)")
     # Un mur par appel CreateWalls : l'elementId retourné est ainsi reliably
     # associé à sa ligne (pas de décalage d'index si un mur échoue).
     wall_ids = {}          # cle -> elementId de la couche MUR (ouvertures)
     wall_layer_ids = {}    # cle -> [elementId de chaque couche] (découpe SEO)
     wall_role_ids = {}     # cle -> {role: elementId} (baies libres dans les revêtements)
+    wall_role_axes = {}    # cle -> {role: (beg, end)} axe de chaque couche, coord. EXPORT
     mur_axes = {}          # cle -> (beg, end) de la couche mur, coord. EXPORT
     fav_a_appliquer = []   # (elementId, favori, keepFields) -> ApplyFavoritesToElements (section 5)
     for cle, seg in canon.items():
@@ -955,12 +973,23 @@ def import_module(data, pick_origin=False):
         roles_ids = {}
         for couche in couches:
             ep = float(couche.get("epaisseur") or 0.0)
-            if ep <= 0:
-                continue   # couche d'épaisseur nulle : pas d'élément créé
+            if ep <= 0 or str(couche.get("id") or "") == "none":
+                continue   # « pas de revêtement » ou épaisseur nulle : rien créé
             role = str(couche.get("role") or "mur")
             d = decalage.get(role, 0.0)
             beg_l = (seg["beg"][0] + nx * d, seg["beg"][1] + ny * d)
             end_l = (seg["end"][0] + nx * d, seg["end"][1] + ny * d)
+            if role == "exterieur":
+                # v2.26 : le revêtement EXTÉRIEUR dépasse d'une épaisseur de MUR à
+                # chaque extrémité, pour se rejoindre aux angles EXTÉRIEURS.
+                # Le revêtement INTÉRIEUR n'est PAS rallongé : le coin intérieur
+                # est la ligne directrice elle-même.
+                dx, dy = end_l[0] - beg_l[0], end_l[1] - beg_l[1]
+                ln = math.hypot(dx, dy) or 1.0
+                ux, uy = dx / ln, dy / ln
+                beg_l = (beg_l[0] - ux * ep_mur, beg_l[1] - uy * ep_mur)
+                end_l = (end_l[0] + ux * ep_mur, end_l[1] + uy * ep_mur)
+            wall_role_axes.setdefault(cle, {})[role] = (beg_l, end_l)
             beg_e, end_e = axes_envoi_pt(beg_l, end_l)
             item = {
                 # v2.23 : AC30/Tapir >= 2.0 — axes beg<->end échangés + "Inside" :
@@ -1010,6 +1039,49 @@ def import_module(data, pick_origin=False):
         ep_ch = float(ch.get("epaisseur") or 0.20)
         fav_ch = favori_de(ch, FAVORIS_CHARPENTE, "")
         cols_data, beams_data = [], []
+        # v2.28 : dédoublonnage — à l'intersection de deux modules accolés (côté
+        # commun en charpente des DEUX côtés), un seul cadre est créé, posé au
+        # MILIEU de l'écart entre les deux lignes directrices (comme le mur
+        # partagé) ; les poteaux d'angle communs à deux côtés charpente ne sont
+        # créés qu'une fois (clé = point arrondi au cm / ligne normalisée).
+        col_vus, poutre_vues = set(), set()
+
+        def voisin_charpente(unite, face_key):
+            """Si le voisin accolé a aussi ce côté commun en charpente : écart (m)
+            entre les deux lignes directrices, sinon 0."""
+            dims_u = unite["dimensions"]
+            bx, by = float(unite.get("x", 0.0)), float(unite.get("y", 0.0))
+            L_u, l_u = float(dims_u["longueur"]), float(dims_u["largeur"])
+            opp = {"nord": "sud", "sud": "nord", "est": "ouest", "ouest": "est"}[face_key]
+            for V in unites:
+                if V is unite:
+                    continue
+                dv = V.get("dimensions") or {}
+                vx, vy = float(V.get("x", 0.0)), float(V.get("y", 0.0))
+                vL, vl = float(dv.get("longueur", 0.0)), float(dv.get("largeur", 0.0))
+                fv = (V.get("murs") or {}).get(opp) or {}
+                if str(fv.get("nature") or "").lower() != "charpente":
+                    continue
+                ovY = vy < by + l_u - 1e-6 and vy + vl > by + 1e-6
+                ovX = vx < bx + L_u - 1e-6 and vx + vL > bx + 1e-6
+                if face_key == "est":
+                    g = vx - (bx + L_u)
+                    if 0 < g <= 0.6 and ovY:
+                        return g
+                elif face_key == "ouest":
+                    g = bx - (vx + vL)
+                    if 0 < g <= 0.6 and ovY:
+                        return g
+                elif face_key == "sud":
+                    g = vy - (by + l_u)
+                    if 0 < g <= 0.6 and ovX:
+                        return g
+                else:
+                    g = by - (vy + vl)
+                    if 0 < g <= 0.6 and ovX:
+                        return g
+            return 0.0
+
         for unite, face_key in charpente_faces:
             uid = unite.get("id", "m0")
             dims_u = unite["dimensions"]
@@ -1018,20 +1090,39 @@ def import_module(data, pick_origin=False):
             H_u = float(dims_u["hauteur"])
             bx = float(unite.get("x", 0.0))
             by = float(unite.get("y", 0.0))
-            # v2.18 : charpente possible sur les 4 côtés
-            if face_key in ("est", "ouest"):
+            # v2.18 : charpente possible sur les 4 côtés ; v2.28 : côté commun
+            # charpente des deux côtés -> cadre unique au milieu de l'écart,
+            # dessiné par le module amont (est/sud) uniquement.
+            g = voisin_charpente(unite, face_key)
+            if g > 0:
+                if face_key in ("ouest", "nord"):
+                    continue      # c'est le module opposé (est/sud) qui dessine
+                if face_key == "est":
+                    x = bx + L_u + g / 2.0
+                    extremites = [(x, by), (x, by + l_u)]
+                else:  # sud
+                    y = by + l_u + g / 2.0
+                    extremites = [(bx, y), (bx + L_u, y)]
+            elif face_key in ("est", "ouest"):
                 x = bx if face_key == "ouest" else bx + L_u
                 extremites = [(x, by), (x, by + l_u)]
             else:
                 y = by if face_key == "nord" else by + l_u
                 extremites = [(bx, y), (bx + L_u, y)]
+            bkey = cle_ligne(extremites[0], extremites[1])
+            if bkey not in poutre_vues:
+                poutre_vues.add(bkey)
+                beams_data.append({"begCoordinate": tr(extremites[0]),
+                                   "endCoordinate": tr(extremites[1]),
+                                   "zCoordinate": H_u, "width": ep_ch, "height": ep_ch})
             for pt in extremites:
+                ckey = (round(pt[0], 2), round(pt[1], 2))
+                if ckey in col_vus:
+                    continue
+                col_vus.add(ckey)
                 p = tr(pt)
                 cols_data.append({"coordinates": {"x": p["x"], "y": p["y"], "z": 0.0},
                                   "height": H_u, "width": ep_ch, "depth": ep_ch})
-            beams_data.append({"begCoordinate": tr(extremites[0]),
-                               "endCoordinate": tr(extremites[1]),
-                               "zCoordinate": H_u, "width": ep_ch, "height": ep_ch})
             # v2.18 : plus de poutre faîtière (doublon au niveau du toit) :
             # le cadre charpente = 2 poteaux + 1 sablière en tête de mur (H).
         if fav_ch:
@@ -1079,15 +1170,19 @@ def import_module(data, pick_origin=False):
             item["compositeId"] = comp_pl
         slabs_data.append(item)
         # dalle du revêtement supérieur, posée sur le plancher
+        # v2.26 : « level » d'une dalle = sa FACE HAUTE -> le revêtement
+        # supérieur est à la hauteur de SA PROPRE épaisseur au-dessus de la
+        # position de base (le dessus du plancher est à 0), pas à +ép. plancher.
         if c_sup is not None and float(c_sup.get("epaisseur") or 0.0) > 0:
-            item_sup = {"level": ep_plancher, "polygonCoordinates": poly}
+            item_sup = {"level": float(c_sup.get("epaisseur") or 0.0), "polygonCoordinates": poly}
             fav_sup = str(c_sup.get("favori") or "").strip()
             comp_sup = resoudre_composite(fav_sup) if fav_sup else None
             if comp_sup:
                 item_sup["structureType"] = "Composite"
                 item_sup["compositeId"] = comp_sup
             slabs_data.append(item_sup)
-    print(f"Création de {len(slabs_data)} dalle(s) de plancher ({nom_plancher})…")
+    print(f"Création de {len(slabs_data)} dalle(s) de plancher ({nom_plancher})… "
+          f"({'pile de couches' if pl_couches else 'sans champ « couches » -> 1 dalle'})")
     slab_response = bridge.tapir_cree("CreateSlabs", {"slabsData": slabs_data})
     errs = [e.get("error") for e in slab_response.get("elements", [])
             if e.get("error")]
@@ -1126,8 +1221,8 @@ def import_module(data, pick_origin=False):
         # le débord ne concerne QUE le revêtement de toiture (couche couverture)
         deb = float(c_couv.get("depassee") or toit.get("depassee") or ep_comp)
     print(f"Création des toitures ({toit.get('type', geo)} / {geo}"
-          f"{', pignon' if pignon else ''}, {len(unites)} module(s), "
-          f"complexe + couverture, débord {deb:.2f} m + épaisseur de mur)…")
+          f"{' — pile de 3 couches' if couches_toit else ' — sans champ « couches » -> 2 niveaux'}, "
+          f"{len(unites)} module(s), complexe + couverture, débord {deb:.2f} m + épaisseur de mur)…")
 
     roofs_data = []
     roof_meta = []   # parallèle de roofs_data : (uid, level, est_couverture, versant)
@@ -1156,19 +1251,63 @@ def import_module(data, pick_origin=False):
             H = float(dims_u["hauteur"])
             bx, by = float(unite.get("x", 0.0)), float(unite.get("y", 0.0))
 
+            # Jonction entre deux modules accolés : détectée par l'ÉCART entre
+            # lignes directrices (0 < écart <= épaisseur max + marge), comme dans
+            # la 3D du configurateur — indépendamment du mur/charpente de chaque
+            # côté et de l'épaisseur courante (l'écart réel peut différer de
+            # l'épaisseur au moment de l'ajout du module).
+            epMax = max([0.2] + [float(f.get("epaisseur") or 0.0)
+                                 for u2 in unites
+                                 for f in (u2.get("murs") or {}).values()
+                                 if isinstance(f, dict)]) + 0.05
+
+            def voisin_gap(face_key):
+                """Écart (m) avec le voisin accolé sur ce côté, 0 si aucun."""
+                for V in unites:
+                    if V is unite:
+                        continue
+                    dv = V.get("dimensions") or {}
+                    vx, vy = float(V.get("x", 0.0)), float(V.get("y", 0.0))
+                    vL, vl = float(dv.get("longueur", 0.0)), float(dv.get("largeur", 0.0))
+                    ovY = vy < by + l - 1e-6 and vy + vl > by + 1e-6
+                    ovX = vx < bx + L - 1e-6 and vx + vL > bx + 1e-6
+                    if face_key == "est":
+                        g = vx - (bx + L)
+                        if 0 < g <= epMax and ovY:
+                            return g
+                    elif face_key == "ouest":
+                        g = bx - (vx + vL)
+                        if 0 < g <= epMax and ovY:
+                            return g
+                    elif face_key == "sud":
+                        g = vy - (by + l)
+                        if 0 < g <= epMax and ovX:
+                            return g
+                    else:  # nord
+                        g = by - (vy + vl)
+                        if 0 < g <= epMax and ovX:
+                            return g
+                return 0.0
+
             def cote(face_key, segments=segments):
                 """Élargissement de la couverture sur ce côté : débord compté
                 depuis la face extérieure du mur = depassee + épaisseur TOTALE
                 du mur (pile de couches, v2.25). Côté partagé entre deux modules
-                accolés (v2.18) : la moitié de l'épaisseur — les deux
-                couvertures se rejoignent ainsi au milieu du mur partagé et
-                passent AU-DESSUS (découpe SEO)."""
+                accolés : règle de la 3D — est/ouest : le module amont recouvre
+                tout l'écart (le voisin démarre à 0, sa ligne directrice) ;
+                nord/sud : chacun prolonge de la moitié de l'écart, les deux
+                couvertures se rejoignent au milieu du mur partagé."""
                 seg = segments.get(face_key)
+                ep_tot = float(seg.get("epaisseur_totale") or seg.get("epaisseur") or 0.255) if seg else 0.255
+                g = 0.0 if (geo == "monopente" and face_key == "nord") else voisin_gap(face_key)
+                if g > 0:
+                    if face_key == "est":
+                        return g          # amont : recouvre le mur commun
+                    if face_key == "ouest":
+                        return 0.0        # aval : démarre à sa ligne directrice
+                    return g / 2.0        # nord/sud : moitié de l'écart chacun
                 if seg is None:
                     return deb + 0.255      # rive en charpente : débord + ép. mur
-                ep_tot = float(seg.get("epaisseur_totale") or seg.get("epaisseur") or 0.255)
-                if cle_count.get(cle_mur(face_key, seg), 0) > 1:
-                    return ep_tot / 2.0
                 return deb + ep_tot
 
             dS, dN, dE, dO = cote("sud"), cote("nord"), cote("est"), cote("ouest")
@@ -1179,23 +1318,29 @@ def import_module(data, pick_origin=False):
             y0, y1 = by - dN, by + l + dS
             emp_v = [tr((x0, y0)), tr((x1, y0)), tr((x1, y1)), tr((x0, y1))]
 
-            # v2.26 : la LIGNE DIRECTRICE (niveau H) = couche COMPLEXE (référence) :
-            # - revêtement inférieur (sous-face) : en dessous, à H - épaisseur
-            # - couverture (revêtement toiture) : au-dessus, à H + épaisseur du
-            #   complexe — SEULE couche avec débord.
+            # v2.26 : la LIGNE DIRECTRICE (niveau H) = couche COMPLEXE (référence).
+            # Niveaux exprimés en DELTA vertical depuis H ; l'épaisseur d'une
+            # couche de toiture est mesurée SELON LE PLAN D'INCLINAISON, donc le
+            # delta vertical vaut ep / cos(pente du versant) :
+            # - revêtement inférieur (sous-face) : delta -ep_inf
+            # - couverture (revêtement toiture) : delta +ep_comp — SEULE couche
+            #   avec débord.
             # Sans champ couches : ancien schéma à 2 niveaux.
             if couches_toit:
-                niveaux = [(H, emp_c, "complexe", comp_comp)]
+                niveaux = [(0.0, emp_c, "complexe", comp_comp)]
                 if ep_inf > 0 or comp_inf:
-                    niveaux.append((H - ep_inf, emp_c, "inferieur", comp_inf))
-                niveaux.append((H + ep_comp, emp_v, "couverture", comp_couv))
+                    niveaux.append((-ep_inf, emp_c, "inferieur", comp_inf))
+                niveaux.append((ep_comp, emp_v, "couverture", comp_couv))
             else:
-                niveaux = [(H, emp_c, "complexe", toit_comp_id),
-                           (H + ep_toit, emp_v, "couverture", toit_comp_id)]
+                niveaux = [(0.0, emp_c, "complexe", toit_comp_id),
+                           (ep_toit, emp_v, "couverture", toit_comp_id)]
 
-            def add_roof(level, poly, with_angle, pivot=None, role="complexe",
+            def add_roof(delta, poly, with_angle, pivot=None, role="complexe",
                          multi=None, versant=None, angle_rad=None, comp=None):
-                r = {"level": level, "polygonCoordinates": poly}
+                # v2.26 : épaisseur selon le plan d'inclinaison -> delta vertical
+                pr = angle_rad if angle_rad is not None else (angle if with_angle else 0.0)
+                level = H + delta / max(math.cos(pr), 0.2)
+                r = {"level": round(level, 6), "polygonCoordinates": poly}
                 cid = comp or toit_comp_id
                 if cid:
                     r["structureType"] = "Composite"
@@ -1223,7 +1368,7 @@ def import_module(data, pick_origin=False):
                 # Arêtes du polygone pivot : 0=nord, 1=est, 2=sud, 3=ouest.
                 # v2.25 : niveaux = pile de couches ; seul le revêtement de
                 # toiture (couverture) a des débords d'arête.
-                for lvl, _emp, role, comp in niveaux:
+                for delta, _emp, role, comp in niveaux:
                     ovs = (dN, dE, dS, dO) if role == "couverture" else (0.0, 0.0, 0.0, 0.0)
                     pe = []
                     for i, ov in enumerate(ovs):
@@ -1231,7 +1376,7 @@ def import_module(data, pick_origin=False):
                         if pignon and i in (1, 3):   # arêtes est/ouest = pignon
                             li["angleType"] = "Gable"
                         pe.append({"levels": [li]})
-                    add_roof(lvl, emp_c, False, role=role, comp=comp,
+                    add_roof(delta, emp_c, False, role=role, comp=comp,
                              multi={"levels": [{"levelHeight": 0.0,
                                                 "levelAngle": angle}],
                                     "pivotEdges": pe})
@@ -1246,25 +1391,25 @@ def import_module(data, pick_origin=False):
                 piv_s = {"begCoordinate": tr((bx + L, by + l)),
                          "endCoordinate": tr((bx, by + l))}
                 if geo == "monopente":
-                    for lvl, emp, role, comp in niveaux:
-                        add_roof(lvl, emp, True, pivot=piv_s, role=role, comp=comp)
+                    for delta, emp, role, comp in niveaux:
+                        add_roof(delta, emp, True, pivot=piv_s, role=role, comp=comp)
                 elif geo == "deuxpentes" and pignon:
                     # v2.18 : faîtage possiblement excentré (pentes asymétriques)
                     x_fait, _hf = faitage(l)
                     ydemi = tr((0.0, by + x_fait))["y"]
-                    for lvl, emp, role, comp in niveaux:
-                        add_roof(lvl, [emp[0], emp[1],
+                    for delta, emp, role, comp in niveaux:
+                        add_roof(delta, [emp[0], emp[1],
                                        {"x": emp[1]["x"], "y": ydemi},
                                        {"x": emp[0]["x"], "y": ydemi}],
                                  True, pivot=piv_n, role=role, versant="nord",
                                  angle_rad=angle_nord, comp=comp)
-                        add_roof(lvl, [{"x": emp[0]["x"], "y": ydemi},
+                        add_roof(delta, [{"x": emp[0]["x"], "y": ydemi},
                                        {"x": emp[1]["x"], "y": ydemi}, emp[2], emp[3]],
                                  True, pivot=piv_s, role=role, versant="sud",
                                  angle_rad=angle_sud, comp=comp)
                 else:
-                    for lvl, emp, role, comp in niveaux:
-                        add_roof(lvl, emp, geo == "deuxpentes", role=role, comp=comp)
+                    for delta, emp, role, comp in niveaux:
+                        add_roof(delta, emp, geo == "deuxpentes", role=role, comp=comp)
 
     build_roofs(use_multi=(geo == "deuxpentes"))
     # Boucle de replis CreateRoofs (v2.18) : selon la version de Tapir, on
@@ -1338,11 +1483,13 @@ def import_module(data, pick_origin=False):
     roof_elements = roof_response.get("elements", [])
     couv_par_uid = {}          # uid -> [elementId des toits de COUVERTURE] (opérateurs SEO)
     toit_par_uid_versant = {}  # uid -> {role: {versant (ou None): elementId}}
+    toit_niveau = {}           # (uid, role, versant) -> level (cote z de la couche)
     if len(roof_elements) == len(roofs_data):
         for (uid, level, role, vers), rel in zip(roof_meta, roof_elements):
             if rel.get("error") or rel.get("elementId") is None:
                 continue
             toit_par_uid_versant.setdefault(uid, {}).setdefault(role, {})[vers] = rel["elementId"]
+            toit_niveau[(uid, role, vers)] = level
             if role == "couverture":
                 couv_par_uid.setdefault(uid, []).append(rel["elementId"])
     if wall_layer_ids and couv_par_uid:
@@ -1404,19 +1551,36 @@ def import_module(data, pick_origin=False):
             owner = toit_de("complexe")   # élément de référence
             if owner is None:
                 continue
+            angle_v = angle_sud if versant == "sud" else angle_nord
+
+            def ancre(role, x_exp, y_exp, proj):
+                """Anchor (x, y, z) — v2.27 : le z est calé sur le PLAN DE LA COUCHE
+                concernée (niveau de la couche + montée selon la pente du versant),
+                même référence de hauteur pour la fenêtre du complexe et les baies
+                libres des revêtements : plus de décalage de hauteur entre couches."""
+                ap = tr((x_exp, y_exp))
+                d = d_toits.get(role, {})
+                vers = versant if versant in d else (None if None in d else next(iter(d), None))
+                lvl = toit_niveau.get((uid, role, vers))
+                if lvl is None:
+                    lvl = toit_niveau.get((uid, role, None), H)
+                ap["z"] = lvl + proj * math.tan(angle_v)
+                return ap
+
             for fen in pent.get("fenetres") or []:
                 pr = float(fen.get("position", 0.0))
                 w = float(fen.get("largeur", 0.0))
                 h = float(fen.get("hauteur", 0.0))
-                proj = h * math.cos(math.radians(pente)) / 2.0
+                proj = h * math.cos(angle_v) / 2.0
                 if versant == "sud":
                     y_exp = by + l_u - proj    # eave sud, vers le faîtage (-Y export)
                 else:
                     y_exp = by + proj          # eave nord, vers le faîtage (+Y export)
                 fv = str(fen.get("favori") or "").strip()
+                x_exp = bx + pr + w / 2.0
                 # fenêtre de toit sur le complexe (référence) : favori d'origine
                 item = {"ownerId": owner,
-                        "anchorPosition": tr((bx + pr + w / 2.0, y_exp)),
+                        "anchorPosition": ancre("complexe", x_exp, y_exp, proj),
                         "width": w, "height": h}
                 if fv:
                     item["favoriteName"] = fv
@@ -1428,12 +1592,12 @@ def import_module(data, pick_origin=False):
                     if rev_id is None or rev_id == owner:
                         continue
                     item_rev = {"ownerId": rev_id,
-                                "anchorPosition": tr((bx + pr + w / 2.0, y_exp)),
+                                "anchorPosition": ancre(role_rev, x_exp, y_exp, proj),
                                 "width": w, "height": h}
-                    if FAVORI_BAIE_LIBRE:
-                        item_rev["favoriteName"] = FAVORI_BAIE_LIBRE
+                    if FAVORI_LUCARNE_VIDE:
+                        item_rev["favoriteName"] = FAVORI_LUCARNE_VIDE
                     skylights_data.append(item_rev)
-                    skylights_favs.append(FAVORI_BAIE_LIBRE)
+                    skylights_favs.append(FAVORI_LUCARNE_VIDE)
         if skylights_data:
             try:
                 resp = bridge.tapir_cree("CreateSkylights", {"skylightsData": skylights_data})
@@ -1521,14 +1685,23 @@ def import_module(data, pick_origin=False):
                     print(f"  ! Ouverture {ouverture.get('id', '?')} non placée "
                           f"sur le mur {face_key} du module {uid} : {exc}")
                 # v2.26 : ouvertures équivalentes (baie libre) dans les couches
-                # de revêtement intérieur / extérieur du même mur
+                # de revêtement intérieur / extérieur du même mur. Le centerOffset
+                # est mesuré depuis l'axe PROPRE du revêtement (qui peut être
+                # rallongé aux extrémités) : la baie libre tombe ainsi à la même
+                # position absolue que la fenêtre dans la couche mur.
                 for role_rev in ("interieur", "exterieur"):
                     rev_id = (wall_role_ids.get(cle) or {}).get(role_rev)
                     if rev_id is None or rev_id == wall_id:
                         continue
+                    rb, re_ = (wall_role_axes.get(cle) or {}).get(role_rev) or (beg_l, end_l)
+                    rb_e, re_e = axes_envoi_pt(rb, re_)
+                    if abs(rb_e[0] - re_e[0]) < 1e-9:      # mur vertical
+                        centre_rev = abs(cy - rb_e[1])
+                    else:                                  # mur horizontal
+                        centre_rev = abs(cx - rb_e[0])
                     item_rev = {
                         "ownerWallId": rev_id,
-                        "centerOffset": centre,
+                        "centerOffset": centre_rev,
                         "width": ouverture["largeur"],
                         "height": ouverture["hauteur"],
                         "refSide": True,
@@ -1592,7 +1765,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Importe un module Baracca (JSON du configurateur web) "
                     "dans le projet Archicad ouvert.")
-    print("BARACCA-IMPORT v2.26 — Archicad 30 / Tapir >= 2.0 uniquement ; "
+    print("BARACCA-IMPORT v2.28 — Archicad 30 / Tapir >= 2.0 uniquement ; "
           "enveloppe déballée, toutes les instances, murs partagés dédoublonnés "
           "(arrondi cm), miroir Y (Nord correct), murs beg<->end échangés + "
           "Inside (corps vers l'extérieur, face extérieure sur la face opposée "

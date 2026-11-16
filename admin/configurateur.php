@@ -766,14 +766,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if (in_array($sous, ['surfaces', 'interieurs', 'couvertures'], true)) {
             // Revêtements (Extérieur / Intérieur / Toiture) : à l'identique du
-            // catalogue, chaque revêtement porte une référence Archicad et une
-            // épaisseur. Saisie en cm (précision mm) — stockage en m.
+            // catalogue, chaque revêtement porte une référence Archicad, une
+            // épaisseur et une couleur par défaut (affichée sans visuel).
+            // Saisie en cm (précision mm) — stockage en m.
             $fields['favori'] = trim((string) ($_POST['favori'] ?? ''));
             $epaisseur = round(cat_num('epaisseur') / 100, 3);
             if ($epaisseur <= 0) {
                 cat_redirect($sous, 'invalid');
             }
             $fields['epaisseur'] = $epaisseur;
+            $fields['rgb'] = [
+                max(0, min(255, (int) round(cat_num('r')))),
+                max(0, min(255, (int) round(cat_num('g')))),
+                max(0, min(255, (int) round(cat_num('b')))),
+            ];
         }
         // La géométrie de la toiture ne se règle plus ici (rubrique « Formes »)
         $item = archicad_catalogue_upsert($sous, $fields, $id !== '' ? $id : null);
@@ -2019,21 +2025,21 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
       <?php else: ?>
         <table class="admin-table">
           <thead>
-            <tr><th>Visuel</th><th>Nom</th><th>Épaisseur</th><th>Coût au m²</th><th>Référence Archicad</th><th>Actions</th></tr>
+            <tr><th>Visuel</th><th>Nom</th><th>Épaisseur</th><th>Couleur</th><th>Référence Archicad</th><th>Actions</th></tr>
           </thead>
           <tbody>
-            <?php foreach ($revItems as $f): ?>
+            <?php foreach ($revItems as $f): $rgbF = $f['rgb'] ?? [158, 158, 158]; ?>
               <tr>
                 <td>
                   <?php if (($f['image'] ?? '') !== ''): ?>
                     <img src="../<?= ltrim(htmlspecialchars((string) $f['image']), '/') ?>" alt="" class="admin-catalogue-thumb">
                   <?php else: ?>
-                    <span class="admin-no-image">—</span>
+                    <span class="admin-color-swatch" style="background-color: <?= cat_hex($rgbF) ?>;" title="Couleur affichée sans visuel"></span>
                   <?php endif; ?>
                 </td>
                 <td><strong><?= htmlspecialchars((string) $f['nom']) ?></strong></td>
                 <td><?= cat_cm((float) ($f['epaisseur'] ?? 0)) ?></td>
-                <td><?= cat_eur((float) ($f['tarif'] ?? 0)) ?> €/m²</td>
+                <td><span class="admin-color-swatch" style="background-color: <?= cat_hex($rgbF) ?>;"></span> <?= cat_hex($rgbF) ?></td>
                 <td><?= ($f['favori'] ?? '') !== '' ? htmlspecialchars((string) $f['favori']) : '—' ?></td>
                 <td class="admin-actions">
                   <?= cat_action_edit('configurateur.php?section=' . $section . '&edit=' . urlencode((string) $f['id'])) ?>
@@ -2081,6 +2087,20 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
           <div class="admin-form-row">
             <label for="fa-epaisseur">Épaisseur (cm)</label>
             <input type="number" id="fa-epaisseur" name="epaisseur" step="0.1" min="0.1" required value="<?= htmlspecialchars($editEnv['item'] ? cat_cm_input((float) ($editEnv['item']['epaisseur'] ?? 0.02)) : '2') ?>">
+          </div>
+        </div>
+        <hr class="admin-sep">
+        <div class="modal-row">
+          <div class="admin-form-row">
+            <?php $rgbRevDefaut = ['surfaces' => [158, 158, 158], 'interieurs' => [235, 230, 220], 'couvertures' => [120, 113, 108]][$section] ?? [158, 158, 158]; ?>
+            <?php $rgbRev = $editEnv['item']['rgb'] ?? $rgbRevDefaut; ?>
+            <label>Couleur par défaut (affichée si aucun visuel, en hex <?= cat_hex($rgbRev) ?>)</label>
+            <div class="admin-color-inputs">
+              <input type="number" name="r" min="0" max="255" value="<?= (int) ($rgbRev[0] ?? 0) ?>" aria-label="Rouge">
+              <input type="number" name="g" min="0" max="255" value="<?= (int) ($rgbRev[1] ?? 0) ?>" aria-label="Vert">
+              <input type="number" name="b" min="0" max="255" value="<?= (int) ($rgbRev[2] ?? 0) ?>" aria-label="Bleu">
+              <span class="admin-color-swatch" style="background-color: <?= cat_hex($rgbRev) ?>;"></span>
+            </div>
           </div>
         </div>
         <hr class="admin-sep">

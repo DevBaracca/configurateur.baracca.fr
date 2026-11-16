@@ -62,23 +62,23 @@ const PLANCHERS = [
   { id: "dalle_beton", nom: "Dalle béton", epaisseur: 0.20, favori: "" },
 ];
 const FACADES = [
-  { id: "bardage_bois", nom: "Bardage bois", image: "" },
-  { id: "enduit", nom: "Enduit minéral", image: "" },
-  { id: "tole", nom: "Tôle nervurée", image: "" },
-  { id: "brique", nom: "Brique de parement", image: "" },
+  { id: "bardage_bois", nom: "Bardage bois", image: "", rgb: [150, 111, 77] },
+  { id: "enduit", nom: "Enduit minéral", image: "", rgb: [226, 220, 208] },
+  { id: "tole", nom: "Tôle nervurée", image: "", rgb: [120, 126, 132] },
+  { id: "brique", nom: "Brique de parement", image: "", rgb: [150, 74, 52] },
 ];
 // Revêtements intérieurs (murs + sous-face de toiture) — catalogue « Intérieur »
 const INTERIEURS = [
-  { id: "placo_ba13", nom: "Placo BA13 + peinture", image: "" },
-  { id: "lambris_bois", nom: "Lambris bois", image: "" },
-  { id: "lambris_pvc", nom: "Lambris PVC", image: "" },
+  { id: "placo_ba13", nom: "Placo BA13 + peinture", image: "", rgb: [240, 238, 234] },
+  { id: "lambris_bois", nom: "Lambris bois", image: "", rgb: [196, 164, 124] },
+  { id: "lambris_pvc", nom: "Lambris PVC", image: "", rgb: [228, 228, 226] },
 ];
 // Couvertures de toiture (revêtement de toiture, par pent) — catalogue « Toiture »
 const COUVERTURES = [
-  { id: "bardeaux_bois", nom: "Bardeaux bois", image: "" },
-  { id: "joint_debout", nom: "Tôle joint debout", image: "" },
-  { id: "tuiles_terre_cuite", nom: "Tuiles terre cuite", image: "" },
-  { id: "epdm", nom: "Membrane EPDM (terrasse)", image: "" },
+  { id: "bardeaux_bois", nom: "Bardeaux bois", image: "", rgb: [146, 100, 62] },
+  { id: "joint_debout", nom: "Tôle joint debout", image: "", rgb: [96, 104, 112] },
+  { id: "tuiles_terre_cuite", nom: "Tuiles terre cuite", image: "", rgb: [158, 72, 48] },
+  { id: "epdm", nom: "Membrane EPDM (terrasse)", image: "", rgb: [52, 54, 56] },
 ];
 const FACES = [
   { key: "nord", label: "Mur Nord" },
@@ -155,6 +155,9 @@ export const dimsOf = (d, env, inst) => {
 };
 // visibilité des constituants d'un module (cases du back-office « Modules ») : tout visible par défaut
 const visOfInst = (d, env, inst) => dimsOf(d, env, inst).visibilite || { murs: true, complexe_toiture: true, plancher: true, couverture: true };
+// le module a un toit visible si le complexe de toiture OU la couverture est visible
+// (les deux couches sont indépendantes depuis la séparation toiture / complexe)
+export const toitVisOf = (vis) => !vis || vis.complexe_toiture !== false || vis.couverture !== false;
 // visibilité d'un pent via son instance propriétaire
 const pentVisOf = (d, env, p) => visOfInst(d, env, (d.instances || []).find((i) => i.id === p.instId) || { moduleId: d.moduleId });
 // arête (mur) visible si l'un des DEUX modules du côté commun a ses murs visibles :
@@ -183,6 +186,7 @@ export const intListOf = (env) => env.interieurs || [];
 // id de couverture effectif d'un pent : valeur enregistrée si elle existe dans
 // le catalogue, sinon le défaut (champ surface de la toiture), sinon le 1er
 export const couvIdOf = (env, id, fallback) => {
+  if (id === "none") return "none"; // « pas de revêtement » explicite
   const l = couvListOf(env);
   if (id && l.some((c) => c.id === id)) return id;
   if (fallback && l.some((c) => c.id === fallback)) return fallback;
@@ -192,6 +196,7 @@ export const couvIdOf = (env, id, fallback) => {
 // repli (revêtement intérieur par défaut de l'élément : mur, plancher, toiture),
 // sinon le premier du catalogue « Intérieur » ("" si le catalogue est vide)
 export const intIdOf = (env, id, fallback) => {
+  if (id === "none") return "none"; // « pas de revêtement » explicite
   const l = intListOf(env);
   if (!l.length) return "";
   if (id && l.some((c) => c.id === id)) return id;
@@ -235,15 +240,16 @@ function pentsOf(d, env) {
   // eachEdge a besoin de l'épaisseur du MUR (pas de la toiture) pour reconnaître les voisins collés
   const epMur = epMurOf(d, env);
   const edges = eachEdge(d, (i) => dimsOf(d, env, i), epMur);
-  // côté commun avec un voisin QUI A un complexe de toiture (un module sans toit
-  // ne supprime pas le débord) ; le module lui-même a forcément un toit (pentsOf l'ignore sinon)
+  // côté commun avec un voisin QUI A un toit visible (complexe ou couverture) ;
+  // un module sans toit (les deux décochés) ne supprime pas le débord
   const commun = (instId, face) => edges.some((e) => e.inst.id === instId && e.face === face && !!e.edge
-    && visOfInst(d, env, e.inst).complexe_toiture);
+    && toitVisOf(visOfInst(d, env, e.inst)));
   insts.forEach((inst, idx) => {
     const dm = dimsOf(d, env, inst);
-    // visibilité du complexe de toiture (back-office « Modules ») : si décoché,
-    // les pents de ce module ne sont PAS créés (pas de plan, pas de chiffrage, pas d'export)
-    if (!visOfInst(d, env, inst).complexe_toiture) return;
+    // visibilité du toit (back-office « Modules ») : si complexe de toiture ET couverture
+    // sont décochés, les pents de ce module ne sont PAS créés (pas de plan, pas de
+    // chiffrage, pas d'export) ; une seule des deux couches suffit à créer les pents
+    if (!toitVisOf(visOfInst(d, env, inst))) return;
     // rectangle intérieur (sous-face) : ligne directrice - 2 épaisseurs de mur
     const dmInt = { ...dm, longueur: Math.max(0.01, dm.longueur - 2 * epMur), largeur: Math.max(0.01, dm.largeur - 2 * epMur) };
     const nbPigExt = (commun(inst.id, "est") ? 0 : 1) + (commun(inst.id, "ouest") ? 0 : 1); // pignons extérieurs
@@ -437,11 +443,11 @@ const murLongueur = (d, face) => murLongueurDm({ longueur: d.longueur, largeur: 
 const POSITION_MIN = 0.078; // 7,8 cm
 const POSITION_STEP = 0.6;  // 60 cm
 
-/* Plancher : dépasse de 21,7 cm de chaque côté de la ligne directrice des
+/* Plancher : dépasse de 15,7 cm de chaque côté de la ligne directrice des
    murs (référence retenue dans l'export JSON) ; en élévation, la ligne
    directrice du plancher est en haut (point bas des murs) et le trait du
    sol est à 20 cm sous le bas du plancher */
-export const PLANCHER_DEPASSEMENT = 0.217; // 21,7 cm de chaque côté
+export const PLANCHER_DEPASSEMENT = 0.157; // 15,7 cm de chaque côté de la ligne directrice des murs
 export const SOL_SOUS_PLANCHER = 0.20;     // 20 cm
 
 const surfaceMenuiserie = (m) =>
@@ -686,8 +692,9 @@ function tarifTotal(d, env) {
   // Fenêtres de toit : détail par fenêtre posée (pent, modèle, dimensions, position, montant)
   const fenetresToitDetail = [];
   Object.entries(d.fenetresToit || {}).forEach(([instId, perInst]) => {
-    // fenêtres de toit non comptées si le complexe de toiture est masqué pour ce module
-    if (!visOfInst(d, env, instOf(d, instId) || { moduleId: d.moduleId }).complexe_toiture) return;
+    // fenêtres de toit non comptées si le toit est entièrement masqué pour ce module
+    // (complexe de toiture ET couverture décochés)
+    if (!toitVisOf(visOfInst(d, env, instOf(d, instId) || { moduleId: d.moduleId }))) return;
     Object.entries(perInst || {}).forEach(([versant, list]) => (list || []).forEach((f, i) => {
       const m = env.fenetresToit?.find((x) => x.id === f.fenetreId);
       const p = (S.pents || []).find((pp) => pp.instId === instId && pp.versant === versant);
@@ -815,7 +822,9 @@ function buildExport(d, env) {
   const isoDef = env.isolations?.find((x) => x.id === d.isolation) || null;
   const surfaceDef = env.facades.find((f) => f.id === murDef.surface) || env.facades[0];
   // Couche de revêtement : id + nom + favori Archicad + épaisseur (m)
+  // id === "none" -> « pas de revêtement » : couche vide (épaisseur 0, non créée)
   const coucheRev = (list, id, fallback) => {
+    if (id === "none") return { id: "none", nom: "", favori: "", epaisseur: 0 };
     const it = list.find((x) => x.id === (id ?? fallback)) || list.find((x) => x.id === fallback) || list[0] || {};
     return { id: it.id ?? "", nom: it.nom ?? "", favori: it.favori ?? "", epaisseur: +(it.epaisseur ?? 0) };
   };
@@ -894,7 +903,7 @@ function buildExport(d, env) {
         nom: plancherDef.nom,
         favori: plancherDef.favori ?? "", // favori Archicad pour le plancher
         epaisseur: +epaisseurPlancher(d, env.planchers).toFixed(3),
-        // le plancher est 21,7 cm plus large que les murs, en prenant
+        // le plancher est 15,7 cm plus large que les murs, en prenant
         // référence la ligne directrice des murs (de chaque côté)
         longueur: +(spanXm(d, env) + 2 * PLANCHER_DEPASSEMENT).toFixed(3),
         largeur: +(spanYm(d, env) + 2 * PLANCHER_DEPASSEMENT).toFixed(3),
@@ -1096,6 +1105,12 @@ function Plan({ d, murs, charpente, toitType, selectedFace, planSel, selInst, cu
   const totalHm = (b.maxY - b.minY) + 2 * murDef.epaisseur;
   const scale = (Math.min(W, H) - 2 * margin) / Math.max(totalWm, totalHm);
   const ep = Math.max(murDef.epaisseur * scale, 4);
+  // charpente : section des poteaux et décalage de leur axe par rapport à la
+  // LIGNE DIRECTRICE (idem 3D) : (section/2) + 1,2 cm vers l'extérieur —
+  // indépendant du type de mur choisi
+  const epC = charpente?.epaisseur ?? 0.20;
+  const offPx = (epC / 2 + 0.012) * scale;   // axe des poteaux / ligne directrice
+  const depPlanPx = PLANCHER_DEPASSEMENT * scale; // dépassement de la dalle / ligne directrice
   const sumColW = (b.maxX - b.minX) * scale;
   const sumRowH = (b.maxY - b.minY) * scale;
   const gx = (W - sumColW) / 2, gy = (H - sumRowH) / 2;
@@ -1155,19 +1170,20 @@ function Plan({ d, murs, charpente, toitType, selectedFace, planSel, selInst, cu
   // Angles aux jonctions : on rallonge une extrémité d'une épaisseur là où aucun
   // mur perpendiculaire ne remplit le coin (coins extérieurs et jonctions en T)
   const rects = edges.map((e) => ({ e, ...edgeRect(e) }));
-  // poteaux charpente aux angles des murs : placés aux intersections des AXES de murs
-  // (ligne directrice ± ep/2) -> les angles partagés entre deux modules accolés
-  // coïncident exactement et ne sont dessinés qu'une fois
+  // poteaux charpente aux angles des murs : placés à ±offPx de la LIGNE DIRECTRICE
+  // (idem 3D : section/2 + 1,2 cm vers l'extérieur, indépendant de l'épaisseur du mur)
+  // -> les angles partagés entre deux modules accolés coïncident exactement
+  // et ne sont dessinés qu'une fois
   const postMap = new Map();
   const charpFaces = new Map(); // `${inst.id}:${face}` -> côté extérieur (edge == null) ?
   for (const e of edges) if (!e.actif) charpFaces.set(`${e.inst.id}:${e.face}`, !e.edge);
   for (const inst of insts) {
     const x0 = X(inst.x), y0 = Y(inst.y), L = Lof(inst), l = lof(inst);
     const corners = [
-      { x: x0 - ep / 2, y: y0 - ep / 2, faces: ["nord", "ouest"] },
-      { x: x0 + L + ep / 2, y: y0 - ep / 2, faces: ["nord", "est"] },
-      { x: x0 + L + ep / 2, y: y0 + l + ep / 2, faces: ["sud", "est"] },
-      { x: x0 - ep / 2, y: y0 + l + ep / 2, faces: ["sud", "ouest"] },
+      { x: x0 - offPx, y: y0 - offPx, faces: ["nord", "ouest"] },
+      { x: x0 + L + offPx, y: y0 - offPx, faces: ["nord", "est"] },
+      { x: x0 + L + offPx, y: y0 + l + offPx, faces: ["sud", "est"] },
+      { x: x0 - offPx, y: y0 + l + offPx, faces: ["sud", "ouest"] },
     ];
     for (const c of corners) {
       // outer = au moins un côté charpente adjacent est un mur EXTÉRIEUR (pas partagé)
@@ -1175,7 +1191,7 @@ function Plan({ d, murs, charpente, toitType, selectedFace, planSel, selInst, cu
       if (!c.faces.some((f) => charpFaces.has(`${inst.id}:${f}`))) continue;
       const key = `${Math.round(c.x)}:${Math.round(c.y)}`;
       const prev = postMap.get(key);
-      postMap.set(key, { x: c.x, y: c.y, s: Math.max(6, (charpente?.epaisseur ?? 0.20) * scale), outer: outer || !!prev?.outer });
+      postMap.set(key, { x: c.x, y: c.y, s: Math.max(6, epC * scale), outer: outer || !!prev?.outer });
     }
   }
   const posts = [...postMap.values()];
@@ -1211,13 +1227,28 @@ function Plan({ d, murs, charpente, toitType, selectedFace, planSel, selInst, cu
       </defs>
       <rect x="0" y="0" width={W} height={H} fill="url(#grid)" />
       <rect x="0" y="0" width={W} height={H} fill="url(#grid100)" />
+      {/* dalle (plancher) de chaque module : dépasse de 15,7 cm (PLANCHER_DEPASSEMENT)
+          de la ligne directrice des murs, comme en 3D ; sur un côté commun à un module
+          accolé, jonction au milieu du mur commun (ep/2) */}
+      {insts.filter((inst) => visOf(inst).plancher !== false).map((inst) => {
+        const epM = murDef.epaisseur * scale / 2;
+        const dN = neighborAt(inst, "nord") ? epM : depPlanPx;
+        const dS = neighborAt(inst, "sud") ? epM : depPlanPx;
+        const dW = neighborAt(inst, "ouest") ? epM : depPlanPx;
+        const dE = neighborAt(inst, "est") ? epM : depPlanPx;
+        return (
+          <rect key={"dalle-" + inst.id} x={X(inst.x) - dW} y={Y(inst.y) - dN}
+            width={Lof(inst) + dW + dE} height={lof(inst) + dN + dS}
+            fill="#efe9e0" stroke="#a8a29e" strokeWidth="1" strokeDasharray="3 3" />
+        );
+      })}
       {/* lignes directrices (intérieures) de chaque module + zone toiture cliquable */}
       {insts.map((inst) => (
         <rect key={inst.id} x={X(inst.x)} y={Y(inst.y)} width={Lof(inst)} height={lof(inst)}
           fill="#faf7f2" stroke="#57534e" strokeWidth="1" strokeDasharray="6 4" />
       ))}
       {/* pents de toiture cliquables : un clic affiche le pent cliqué dans la carte */}
-      {onSelectPent && insts.filter((inst) => visOf(inst).complexe_toiture).map((inst) => {
+      {onSelectPent && insts.filter((inst) => toitVisOf(visOf(inst))).map((inst) => {
         const x = X(inst.x), y = Y(inst.y), L = Lof(inst), l = lof(inst);
         return pentParts(d, inst, dimsOf, pents, toitType, x, y, L, l, ep).map((pp) => (
           <polygon key={pp.versant}
@@ -1232,7 +1263,7 @@ function Plan({ d, murs, charpente, toitType, selectedFace, planSel, selInst, cu
       })}
       {/* fenêtres de toit : cadre en pointillé sur le pent, à 20 px du bas de
           pente ; la profondeur du cadre est projetée selon la pente (hauteur × cos) */}
-      {insts.filter((inst) => visOf(inst).complexe_toiture).map((inst) => {
+      {insts.filter((inst) => toitVisOf(visOf(inst))).map((inst) => {
         const x = X(inst.x), y = Y(inst.y), L = Lof(inst), l = lof(inst);
         return Object.entries(d.fenetresToit?.[inst.id] || {}).flatMap(([versant, list]) =>
           (list || []).map((f, i) => {
@@ -1254,7 +1285,7 @@ function Plan({ d, murs, charpente, toitType, selectedFace, planSel, selInst, cu
         );
       })}
       {/* faitage de chaque module */}
-      {insts.filter((inst) => visOf(inst).complexe_toiture).map((inst) => {
+      {insts.filter((inst) => toitVisOf(visOf(inst))).map((inst) => {
         const dm = dimsOf(inst);
         if (toitType === "deuxpentes") {
           const t1 = Math.tan((pente1Of(d) * Math.PI) / 180);
@@ -1405,11 +1436,16 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
     (H - 2 * margin) / Math.max(hMax + hFmax + epToit + epP + SOL_SOUS_PLANCHER, 3)
   );
   const epPx = murDef.epaisseur * scale;
+  // charpente : axe des poteaux/sablière à ±offPx de la LIGNE DIRECTRICE
+  // (idem 3D : section/2 + 1,2 cm vers l'extérieur — indépendant du type de mur)
+  const epCpx = (charpente?.epaisseur ?? 0.20) * scale;
+  const offPx = epCpx / 2 + 0.012 * scale;
   const epPxP = epP * scale;                      // épaisseur du plancher en px
   // épaisseur de toiture en px : doublée (x6) seulement en vue de pignon (est/ouest, où on
   // voit l'épaisseur), +30 % en plus ; en vue nord/sud (horiz) on reste à x3
-  const epToitPx = epToit * scale * (horiz ? 3 : 6 * 1.3);
-  const toitStrokePx = horiz ? 3 : 6 * 1.3;      // épaisseur du contour de toit (idem)
+  const epToitPx = epToit * scale;                   // épaisseur de toiture en px, proportionnelle (épaisseur réelle du back-office)
+  const epToitReelPx = epToit * scale;              // idem : relève le toit au-dessus du mur (comme en 3D, surface à H + épaisseur)
+  const toitStrokePx = horiz ? 2 : 3;            // contour de toit fin : l'épaisseur est portée par la bande
   const depPx = PLANCHER_DEPASSEMENT * scale;     // dépassement du plancher / ligne directrice des murs
   const L = Lm * scale;
   const x0 = (W - L) / 2;
@@ -1420,21 +1456,23 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
   // déjà inversé côté App). Pas de miroir pour sud et ouest.
   const miroir = faceKey === "nord" || faceKey === "est";
   const xa = x0 - epPx, xb = x0 + L + epPx;   // bords extérieurs de la façade
-  const pa = x0 - depPx, pb = x0 + L + depPx; // bords du plancher (21,7 cm au-delà de la ligne directrice)
+  const pa = x0 - depPx, pb = x0 + L + depPx; // bords du plancher (15,7 cm au-delà de la ligne directrice)
   const surfaceOf = (face) => surfaces.find((s) => s.id === (face?.surface ?? murDef.surface)) || surfaces[0];
   // segment traversant (côté opposé vu derrière une charpente) : revêtement INTÉRIEUR
   const sdOf = (seg) => seg.traversant
     ? ((interieurs || []).find((x) => x.id === (seg.face?.surfaceInt ?? murDef?.interieur)) || null)
     : surfaceOf(seg.face);
-  // visuel de couverture du pent visible sur cette façade (catalogue « Toiture »)
-  const couvImgOfSeg = (seg) => {
-    if (!horiz) return ""; // vue de pignon : pas de bande de toit remplie
+  // revêtement de couverture du pent visible sur cette façade (catalogue « Toiture ») ;
+  // en vue de pignon (est/ouest), on prend le pent de la face, sinon le versant nord
+  const couvItemOfSeg = (seg) => {
     const list = couvertures?.length ? couvertures : surfaces;
-    const raw = d.surfacesToiture?.[seg.inst?.id ?? "m0"]?.[faceKey];
+    const perInst = d.surfacesToiture?.[seg.inst?.id ?? "m0"] || {};
+    const raw = perInst[faceKey] ?? perInst.nord;
     const fb = toiture?.couverture ?? toiture?.surface;
     const cid = raw && list.some((c) => c.id === raw) ? raw : (fb && list.some((c) => c.id === fb) ? fb : list[0]?.id);
-    return list.find((c) => c.id === cid)?.image || "";
+    return list.find((c) => c.id === cid) || null;
   };
+  const couvImgOfSeg = (seg) => couvItemOfSeg(seg)?.image || "";
   // prolonge un segment (x1,y1)-(x2,y2) de dG/dD px à chaque extrémité, le long de sa direction
   const prolonge = (x1, y1, x2, y2, dG, dD) => {
     const dx = x2 - x1, dy = y2 - y1;
@@ -1443,42 +1481,74 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
   };
   // path de toiture d'un segment ; debG/debD = débord autorisé à gauche/droite
   // (false sur un côté commun à deux modules qui se touchent : pas de débord là)
-  const toitOf = (x0s, Ls, yTop, hF, dm, debG = true, debD = true) => {
+  const toitOf = (x0s, Ls, yTop, hF, dm, debG = true, debD = true, couvHex = null, epCouvPx = null) => {
     // débord de toiture : la vraie valeur (depM en m) convertie en px par l'échelle,
     // identique partout ; en vue de côté (horiz) il est latéral (en x), en pignon il suit la pente
     const debP = (depM ?? epToit) * scale;
     const debL = horiz && debG ? debP : 0;
     const debR = horiz && debD ? debP : 0;
     const xaS = x0s - epPx - debL, xbS = x0s + Ls + epPx + debR;
-    const fillToit = mixHex(rgbHex(toitRgb), "#ffffff", 0.55); // bande pleine opaque (teintée couleur toiture), la grille ne transparaît pas
-    if (toitType === "terrasse") return { path: `M ${xaS} ${yTop} L ${xbS} ${yTop} L ${xbS} ${yTop - epToitPx} L ${xaS} ${yTop - epToitPx} Z`, fill: fillToit, dash: null, cote: false };
+    // empreinte du complexe de toiture = LIGNE DIRECTRICE seule (x0s..x0s+Ls),
+    // comme en 3D : pas de débord, pas jusqu'aux faces extérieures des murs
+    const caS = x0s, cbS = x0s + Ls;
+    const hexCouv = couvHex ?? rgbHex(toitRgb);   // couleur du revêtement de couverture (back-office)
+    const epC = epCouvPx ?? Math.max(1.5, epToitReelPx * 0.25); // épaisseur de la couverture en px
+    const fillToit = mixHex(hexCouv, "#ffffff", 0.55);  // bande couverture (teintée couleur du revêtement de toiture)
+    const fillCplx = rgbHex(toitRgb);                   // chant du complexe : couleur exacte du complexe (back-office)
+    // ordonnée sur une droite (xA,yA)-(xB,yB) — sert à caler la bande complexe sur la
+    // ligne du contour (même pente) tout en la limitant à la ligne directrice
+    const yAt = (x, xA, yA, xB, yB) => yA + ((yB - yA) * (x - xA)) / (xB - xA);
+    // bande du complexe en rive horizontale : épaisseur totale + sous-bande couverture en haut
+    const bandeHoriz = (yEave) => ({
+      path: `M ${caS} ${yEave} L ${cbS} ${yEave} L ${cbS} ${yEave + epToitReelPx} L ${caS} ${yEave + epToitReelPx} Z`, fill: fillCplx,
+      couv: { path: `M ${caS} ${yEave} L ${cbS} ${yEave} L ${cbS} ${yEave + epC} L ${caS} ${yEave + epC} Z`, fill: fillToit },
+    });
+    if (toitType === "terrasse") return { path: `M ${xaS} ${yTop} L ${xbS} ${yTop} L ${xbS} ${yTop - epToitPx} L ${xaS} ${yTop - epToitPx} Z`, fill: fillToit, dash: null, cote: false, bande: bandeHoriz(yTop) };
     if (toitType === "monopente") {
       // façade nord = pignon haut : le mur monte jusqu'au toit, la toiture n'est
       // vue que de chant (trait du haut) ; façade sud = versant vu de face (bande)
-      if (horiz && faceKey === "nord") return { path: `M ${xaS} ${yTop - hF} L ${xbS} ${yTop - hF}`, fill: "none", dash: null, cote: false };
-      if (horiz) return { path: `M ${xaS} ${yTop} L ${xaS} ${yTop - hF} L ${xbS} ${yTop - hF} L ${xbS} ${yTop} Z`, fill: fillToit, dash: null, cote: true };
-      // est/ouest : le mur monte aussi jusqu'au toit (pignon monopente) ; le toit
-      // dépasse en suivant la ligne de la pente (prolongé de epToitPx à chaque bout,
-      // depuis la ligne directrice du mur, sans débord en x)
+      if (horiz && faceKey === "nord") return { path: `M ${xaS} ${yTop - hF} L ${xbS} ${yTop - hF}`, fill: "none", dash: null, cote: false, bande: bandeHoriz(yTop - hF) };
+      if (horiz) return { path: `M ${xaS} ${yTop} L ${xaS} ${yTop - hF} L ${xbS} ${yTop - hF} L ${xbS} ${yTop} Z`, fill: fillToit, dash: null, cote: true, bande: bandeHoriz(yTop) };
+      // est/ouest (pignon monopente) : contour avec débord le long de la pente
       const [mx0, my0, mx1, my1] = prolonge(...(faceKey === "ouest" ? [xaS, yTop - hF, xbS, yTop] : [xaS, yTop, xbS, yTop - hF]), debG ? debP : 0, debD ? debP : 0);
-      return { path: `M ${mx0} ${my0} L ${mx1} ${my1}`, fill: "none", dash: null, cote: false, pignon: true, apexX: faceKey === "ouest" ? x0s - epPx : x0s + Ls + epPx };
+      // bande complexe sur la même droite que le contour, limitée à la ligne directrice
+      const [ax, ay, bx, by] = faceKey === "ouest" ? [xaS, yTop - hF, xbS, yTop] : [xaS, yTop, xbS, yTop - hF];
+      const yL = yAt(caS, ax, ay, bx, by), yR = yAt(cbS, ax, ay, bx, by);
+      return {
+        path: `M ${mx0} ${my0} L ${mx1} ${my1}`, fill: "none", dash: null, cote: false, pignon: true,
+        apexX: faceKey === "ouest" ? x0s - epPx : x0s + Ls + epPx,
+        bande: {
+          path: `M ${caS} ${yL} L ${cbS} ${yR} L ${cbS} ${yR + epToitReelPx} L ${caS} ${yL + epToitReelPx} Z`, fill: fillCplx,
+          couv: { path: `M ${caS} ${yL} L ${cbS} ${yR} L ${cbS} ${yR + epC} L ${caS} ${yL + epC} Z`, fill: fillToit },
+        },
+      };
     }
     if (horiz && toitType === "quatrepentes") {
       const rx1 = x0s + (dm.largeur / 2) * scale, rx2 = x0s + Ls - (dm.largeur / 2) * scale;
-      return { path: `M ${xaS} ${yTop} L ${rx1} ${yTop - hF} L ${rx2} ${yTop - hF} L ${xbS} ${yTop} Z`, fill: fillToit, dash: null, cote: false };
+      return { path: `M ${xaS} ${yTop} L ${rx1} ${yTop - hF} L ${rx2} ${yTop - hF} L ${xbS} ${yTop} Z`, fill: fillToit, dash: null, cote: false, bande: bandeHoriz(yTop) };
     }
-    if (horiz) return { path: `M ${xaS} ${yTop} L ${xaS} ${yTop - hF} L ${xbS} ${yTop - hF} L ${xbS} ${yTop} Z`, fill: fillToit, dash: null, cote: true };
+    if (horiz) return { path: `M ${xaS} ${yTop} L ${xaS} ${yTop - hF} L ${xbS} ${yTop - hF} L ${xbS} ${yTop} Z`, fill: fillToit, dash: null, cote: true, bande: bandeHoriz(yTop) };
     // est/ouest, deux pentes ou croupe (vue de pignon) : le mur monte jusqu'au
-    // faitage, la toiture n'est dessinée qu'en contour
+    // faitage, la couverture n'est dessinée qu'en contour
     const t1 = Math.tan((pente1Of(d) * Math.PI) / 180);
     const hFm = hauteurFaitageDm(dm, pente1Of(d), pente2Of(d), toitType);
     const run1 = t1 > 0 ? Math.min(Math.max(hFm / t1, 0), dm.largeur) : dm.largeur / 2;
     const apexX = miroir ? x0s + Ls - run1 * scale : x0s + run1 * scale;
-    // débord du toit en suivant la pente : chaque versant est prolongé de epToitPx
+    // débord du toit en suivant la pente : chaque versant est prolongé de debP
     // au-delà du mur, depuis la ligne directrice (sans débord en x)
     const [px0, py0] = prolonge(xaS, yTop, apexX, yTop - hF, debG ? debP : 0, 0);
     const [, , px1, py1] = prolonge(apexX, yTop - hF, xbS, yTop, 0, debD ? debP : 0);
-    return { path: `M ${px0} ${py0} L ${apexX} ${yTop - hF} L ${px1} ${py1}`, fill: "none", dash: null, cote: false, pignon: true, apexX };
+    // bande complexe sur la même droite que le contour (même pente), limitée à la
+    // ligne directrice (caS..cbS) : le complexe n'a PAS de débord
+    const yL = yAt(caS, xaS, yTop, apexX, yTop - hF);
+    const yR = yAt(cbS, apexX, yTop - hF, xbS, yTop);
+    return {
+      path: `M ${px0} ${py0} L ${apexX} ${yTop - hF} L ${px1} ${py1}`, fill: "none", dash: null, cote: false, pignon: true, apexX,
+      bande: {
+        path: `M ${caS} ${yL} L ${apexX} ${yTop - hF} L ${cbS} ${yR} L ${cbS} ${yR + epToitReelPx} L ${apexX} ${yTop - hF + epToitReelPx} L ${caS} ${yL + epToitReelPx} Z`, fill: fillCplx,
+        couv: { path: `M ${caS} ${yL} L ${apexX} ${yTop - hF} L ${cbS} ${yR} L ${cbS} ${yR + epC} L ${apexX} ${yTop - hF + epC} L ${caS} ${yL + epC} Z`, fill: fillToit },
+      },
+    };
   };
   // segments projetés à leur vraie position le long de la façade (miroir pour
   // nord/est), puis triés du plus profond au plus proche : le module le plus
@@ -1499,8 +1569,8 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
     // côté commun = voisin accolé À LA MÊME PROFONDEUR qui touche ; un voisin en
     // retrait (profondeur différente, ex. L au nord) ne supprime pas le débord
     const memeProf = (o) => Math.abs((o.depth ?? 0) - (s.depth ?? 0)) < eps;
-    // un voisin sans complexe de toiture (visibilité décochée) ne supprime pas le débord
-    const toitOk = (o) => o.vis?.complexe_toiture ?? true;
+    // un voisin sans toit visible (complexe ET couverture décochés) ne supprime pas le débord
+    const toitOk = (o) => toitVisOf(o.vis);
     let debG = !segs.some((o) => o !== s && memeProf(o) && toitOk(o) && Math.abs(posOf(o) + lenOf(o) + epM - pos) < eps);
     let debD = !segs.some((o) => o !== s && memeProf(o) && toitOk(o) && Math.abs(pos + lenM + epM - posOf(o)) < eps);
     if (miroir) { const t = debG; debG = debD; debD = t; } // en nord/est, l'axe est inversé
@@ -1508,7 +1578,19 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
     // on ne supprime JAMAIS le débord au nord, même sur un côté commun.
     // En vue est/ouest, l'extrémité nord de la pente est debG (ouest) / debD (est).
     if (toitType === "monopente" && !horiz) { if (faceKey === "ouest") debG = true; else debD = true; }
-    return { ...s, x0s, Ls, hM, hF, yTop: yPlancher - hM, toit: toitOf(x0s, Ls, yPlancher - hM, hF, s.dm, debG, debD) };
+    const yTop = yPlancher - hM;        // haut du mur (H)
+    const yToit = yTop - epToitReelPx;   // rive de la couverture = dessus du complexe (H + épaisseur réelle), comme en 3D
+    // revêtement de couverture du pent (si visible) : couleur + épaisseur réelles (back-office)
+    const couvIt = s.vis?.couverture !== false ? couvItemOfSeg(s) : null;
+    const couvHex = rgbHex(couvIt?.rgb ?? toitRgb);
+    const epCouvPx = Math.max(1.5, (+(couvIt?.epaisseur ?? epToit / 2)) * scale);
+    const toit = toitOf(x0s, Ls, yToit, hF, s.dm, debG, debD, couvHex, epCouvPx);
+    // le contour et le remplissage de la toiture reprennent la couleur de ce revêtement
+    toit.contour = couvHex;
+    if (toit.fill !== "none") {
+      toit.fill = mixHex(couvHex, "#ffffff", 0.55);
+    }
+    return { ...s, x0s, Ls, hM, hF, yTop, yToit, toit };
   });
   placed.sort((a, c) => (c.depth ?? 0) - (a.depth ?? 0)); // dessin du fond vers l'avant
   // un seul toit visible par zone de chevauchement : le segment le plus proche de la face
@@ -1517,9 +1599,9 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
     const lenM = horiz ? s.dm.longueur : s.dm.largeur;
     const posO = (o) => (horiz ? o.inst?.x : o.inst?.y) ?? 0;
     const lenO = (o) => (horiz ? o.dm.longueur : o.dm.largeur);
-    // un toit n'est masqué que par un segment plus proche QUI A un complexe de toiture
-    // visible (un module "plancher seul" devant ne cache pas la toiture derrière)
-    s.toitVisible = !s.traversant && !placed.some((o) => o !== s && !o.traversant && (o.depth ?? 0) < (s.depth ?? 0) && (o.vis?.complexe_toiture ?? true) &&
+    // un toit n'est masqué que par un segment plus proche QUI A un toit visible
+    // (complexe ou couverture ; un module "plancher seul" devant ne cache pas la toiture derrière)
+    s.toitVisible = !s.traversant && !placed.some((o) => o !== s && !o.traversant && (o.depth ?? 0) < (s.depth ?? 0) && toitVisOf(o.vis) &&
       pos < posO(o) + lenO(o) && posO(o) < pos + lenM);
   });
   // profondeur relative (0 = le plus proche de la face) pour griser les segments au fond
@@ -1528,16 +1610,18 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
   const minDepth = Math.min(0, ...placed.filter((s) => !s.traversant).map((s) => s.depth ?? 0)); // premier plan
   const ox = (o, seg) => seg.x0s + (miroir ? seg.Ls - (o.position + o.largeur) * scale : o.position * scale);
   // En monopente, la façade nord est le pignon haut : le mur monte jusqu'au toit
-  const murTopOf = (seg) => (toitType === "monopente" && faceKey === "nord" ? seg.yTop - seg.hF : seg.yTop);
+  // haut du mur : jusqu'à la base du toit (yToit = dessus du complexe), comme en 3D
+  const murTopOf = (seg) => (toitType === "monopente" && faceKey === "nord" ? seg.yToit - seg.hF : seg.yToit);
   // poteaux charpente aux angles des segments sans mur : un seul poteau par x
   // (dédupliqué entre segments adjacents qui partagent le même angle)
   const charpPosts = [];
   const postByX = new Map(); // x arrondi -> poteau (on garde le plus proche du spectateur)
   placed.forEach((seg, si) => {
     if (seg.face?.actif || seg.vis?.murs === false) return;
-    // poteaux aux intersections des axes de murs (± epPx/2) : angles partagés
-    // entre segments coïncident -> un seul poteau, celui du segment le plus proche
-    for (const x of [seg.x0s - epPx / 2, seg.x0s + seg.Ls + epPx / 2]) {
+    // poteaux à ±offPx de la ligne directrice (idem 3D : section/2 + 1,2 cm vers
+    // l'extérieur, indépendant de l'épaisseur du mur) : angles partagés entre
+    // segments coïncident -> un seul poteau, celui du segment le plus proche
+    for (const x of [seg.x0s - offPx, seg.x0s + seg.Ls + offPx]) {
       const k = Math.round(x);
       const prev = postByX.get(k);
       if (prev && (prev.seg.depth ?? 0) <= (seg.depth ?? 0)) continue; // le plus proche gagne
@@ -1582,9 +1666,9 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
       <rect x="0" y="0" width={W} height={H} fill="url(#gridE100)" />
       <line x1={20} y1={ySol} x2={W - 20} y2={ySol} stroke="#a8a29e" strokeWidth="2" />
       {/* plancher continu : ligne directrice en haut (bas des murs), épaisseur vers le bas,
-          bords à 21,7 cm au-delà de la ligne directrice des murs */}
+          bords à 15,7 cm au-delà de la ligne directrice des murs */}
       <rect x={pa} y={yPlancher} width={L + 2 * depPx} height={epPxP}
-        fill={surfaces.find((f) => f.id === (d.revetementChantPlancher ?? plancherDef?.revetement_chants ?? murDef?.surface))?.image ? "url(#chantPatE)" : "#e7e5e4"}
+        fill={(() => { const it = surfaces.find((f) => f.id === (d.revetementChantPlancher ?? plancherDef?.revetement_chants ?? murDef?.surface)); return it?.image ? "url(#chantPatE)" : rgbHex(it?.rgb ?? [231, 229, 228]); })()}
         stroke="#78716c" style={{ cursor: onSelectPlancher ? "pointer" : undefined }}
         onClick={onSelectPlancher} title="Choisir les revêtements du plancher" />
       <line x1={pa} y1={yPlancher} x2={pb} y2={yPlancher} stroke="#57534e" strokeWidth="1" strokeDasharray="5 4" />
@@ -1597,7 +1681,7 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
               {sd?.image && (
                 <clipPath id={`murClip-${i}`}>
                   {seg.toit.pignon ? (
-                    <path d={`M ${seg.x0s - epPx} ${yPlancher} L ${seg.x0s - epPx} ${seg.yTop} L ${seg.toit.apexX} ${seg.yTop - seg.hF} L ${seg.x0s + seg.Ls + epPx} ${seg.yTop} L ${seg.x0s + seg.Ls + epPx} ${yPlancher} Z`} />
+                    <path d={`M ${seg.x0s - epPx} ${yPlancher} L ${seg.x0s - epPx} ${seg.yToit} L ${seg.toit.apexX} ${seg.yToit - seg.hF} L ${seg.x0s + seg.Ls + epPx} ${seg.yToit} L ${seg.x0s + seg.Ls + epPx} ${yPlancher} Z`} />
                   ) : (
                     <rect x={seg.x0s - epPx} y={murTopOf(seg)} width={seg.Ls + 2 * epPx} height={yPlancher - murTopOf(seg)} />
                   )}
@@ -1608,9 +1692,9 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
               )}
               {/* vue de pignon : zone SOUS le contour de toit — sert à couper les hauts
                   de charpente (sablières, poteaux) qui dépasseraient de la ligne de toit */}
-              {seg.toit.pignon && (seg.vis?.complexe_toiture ?? true) && seg.toitVisible !== false && (
+              {seg.toit.pignon && toitVisOf(seg.vis) && seg.toitVisible !== false && (
                 <clipPath id={`toitCut-${i}`}>
-                  <path d={`M ${seg.x0s - epPx} ${seg.yTop} L ${seg.toit.apexX} ${seg.yTop - seg.hF} L ${seg.x0s + seg.Ls + epPx} ${seg.yTop} L ${seg.x0s + seg.Ls + epPx} ${H} L ${seg.x0s - epPx} ${H} Z`} />
+                  <path d={`M ${seg.x0s - epPx} ${seg.yToit} L ${seg.toit.apexX} ${seg.yToit - seg.hF} L ${seg.x0s + seg.Ls + epPx} ${seg.yToit} L ${seg.x0s + seg.Ls + epPx} ${H} L ${seg.x0s - epPx} ${H} Z`} />
                 </clipPath>
               )}
             </React.Fragment>
@@ -1623,11 +1707,13 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
       {placed.map((seg, i) => {
         if (!seg.traversant) return null;
         const sd = sdOf(seg);
-        const fill = mixHex(rgbHex(murDef.rgb), "#ffffff", 0.85); // bien grisé (fond)
+        // mur opposé vu de face à travers une charpente : on voit sa face INTÉRIEURE
+        // -> couleur exacte du revêtement intérieur (back-office)
+        const fill = rgbHex(sd?.rgb ?? murDef.rgb);
         return (
           <g key={"trav-" + (seg.inst?.id || i)}>
             {seg.toit.pignon ? (
-              <path d={`M ${seg.x0s - epPx} ${yPlancher} L ${seg.x0s - epPx} ${seg.yTop} L ${seg.toit.apexX} ${seg.yTop - seg.hF} L ${seg.x0s + seg.Ls + epPx} ${seg.yTop} L ${seg.x0s + seg.Ls + epPx} ${yPlancher} Z`}
+              <path d={`M ${seg.x0s - epPx} ${yPlancher} L ${seg.x0s - epPx} ${seg.yToit} L ${seg.toit.apexX} ${seg.yToit - seg.hF} L ${seg.x0s + seg.Ls + epPx} ${seg.yToit} L ${seg.x0s + seg.Ls + epPx} ${yPlancher} Z`}
                 fill={fill} stroke="#78716c" />
             ) : (
               <rect x={seg.x0s - epPx} y={murTopOf(seg)} width={seg.Ls + 2 * epPx} height={yPlancher - murTopOf(seg)}
@@ -1635,8 +1721,8 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
             )}
             {sd?.image && (
               <image href={sd.image} xlinkHref={sd.image} x={seg.x0s - epPx}
-                y={seg.toit.pignon ? seg.yTop - seg.hF : murTopOf(seg)}
-                width={seg.Ls + 2 * epPx} height={yPlancher - (seg.toit.pignon ? seg.yTop - seg.hF : murTopOf(seg))}
+                y={seg.toit.pignon ? seg.yToit - seg.hF : murTopOf(seg)}
+                width={seg.Ls + 2 * epPx} height={yPlancher - (seg.toit.pignon ? seg.yToit - seg.hF : murTopOf(seg))}
                 preserveAspectRatio="xMidYMid slice" clipPath={`url(#murClip-${i})`} opacity="0.55" />
             )}
           </g>
@@ -1647,6 +1733,7 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
         const epC = Math.max(4, (charpente?.epaisseur ?? 0.20) * scale);
         const t = maxDepth ? (p.seg.depth ?? 0) / maxDepth : 0;
         return (
+          // le poteau s'arrête SOUS la sablière : son haut = bas de la poutre (yTop)
           <rect key={"bg-" + i} x={p.x - epC / 2} y={p.seg.yTop} width={epC} height={yPlancher - p.seg.yTop}
             fill={charpente?.image ? "url(#charpPatE)" : mixHex(rgbHex(charpente?.rgb || [140, 107, 89]), "#ffffff", 0.6 * t)} stroke="#57534e" strokeWidth="1" pointerEvents="none" clipPath={p.cut} />
         );
@@ -1659,6 +1746,42 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
         return (
           // clé unique : le segment traversant (côté opposé) partage l'id du module -> préfixe
           <g key={(seg.traversant ? "trav-" : "") + (seg.inst?.id || i)}>
+            {/* vue de pignon avec charpente sur la face vue : les CHANTS des murs nord/sud
+                (perpendiculaires) apparaissent derrière les poteaux, en couleur par défaut
+                du mur (back-office) — dessinés avant les poteaux */}
+            {seg.toit.pignon && seg.face?.actif === false && (() => {
+              // chants nord/sud derrière la charpente : montent jusqu'au faîte puis sont
+              // coupés par la pente de toit (toitCut), comme sur la 3D.
+              // En vue miroir (nord/est) l'axe est inversé : le chant à gauche (x0s) est
+              // le mur sud, celui à droite (x0s+Ls) est le mur nord.
+              const left = miroir ? seg.inst?.murs?.sud : seg.inst?.murs?.nord;
+              const right = miroir ? seg.inst?.murs?.nord : seg.inst?.murs?.sud;
+              const clip = toitVisOf(vis) && seg.toitVisible !== false ? `url(#toitCut-${i})` : undefined;
+              return (
+                <>
+                  {left?.actif !== false && (
+                    <rect x={seg.x0s - epPx} y={seg.yToit - seg.hF - 10} width={epPx} height={yPlancher - seg.yToit + seg.hF + 10}
+                      fill={rgbHex(murDef.rgb)} stroke="#78716c" clipPath={clip} />
+                  )}
+                  {right?.actif !== false && (
+                    <rect x={seg.x0s + seg.Ls} y={seg.yToit - seg.hF - 10} width={epPx} height={yPlancher - seg.yToit + seg.hF + 10}
+                      fill={rgbHex(murDef.rgb)} stroke="#78716c" clipPath={clip} />
+                  )}
+                </>
+              );
+            })()}
+            {/* complexe de toiture : bande d'épaisseur sous la couverture, calée sur la
+                ligne directrice (sans débord) — dessinée AVANT le mur (le mur prend le
+                dessus) et avant la charpente ; la sous-bande haute = couverture (couleur
+                du revêtement de toiture choisi dans le back-office) */}
+            {toitVisOf(vis) && seg.toitVisible !== false && vis.complexe_toiture && seg.toit.bande && (
+              <>
+                <path d={seg.toit.bande.path} fill={seg.toit.bande.fill} stroke={mixHex(rgbHex(toitRgb), "#ffffff", 0.6 * t)} strokeWidth={1} strokeLinejoin="round" />
+                {vis.couverture !== false && seg.toit.bande.couv && (
+                  <path d={seg.toit.bande.couv.path} fill={seg.toit.bande.couv.fill} stroke="none" />
+                )}
+              </>
+            )}
             {/* mur du segment (ligne directrice intérieure, épaisseur vers l'extérieur), opaque :
                 la grille de fond ne doit pas transparaître ; la profondeur se fait par un
                 mélange vers le blanc (ou un voile blanc sur les murs texturés) */}
@@ -1666,22 +1789,22 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
               /* vue de pignon : le mur monte jusqu'au faitage de la toiture
                   (pas de triangle plein si le côté est en charpente) */
               <path
-                d={`M ${seg.x0s - epPx} ${yPlancher} L ${seg.x0s - epPx} ${seg.yTop} L ${seg.toit.apexX} ${seg.yTop - seg.hF} L ${seg.x0s + seg.Ls + epPx} ${seg.yTop} L ${seg.x0s + seg.Ls + epPx} ${yPlancher} Z`}
-                fill={mixHex(rgbHex(murDef.rgb), "#ffffff", 0.6 * t)} stroke="#78716c" />
+                d={`M ${seg.x0s - epPx} ${yPlancher} L ${seg.x0s - epPx} ${seg.yToit} L ${seg.toit.apexX} ${seg.yToit - seg.hF} L ${seg.x0s + seg.Ls + epPx} ${seg.yToit} L ${seg.x0s + seg.Ls + epPx} ${yPlancher} Z`}
+                fill={mixHex(rgbHex(sd?.rgb ?? murDef.rgb), "#ffffff", 0.6 * t)} stroke="#78716c" />
             ) : (
             <rect x={seg.x0s - epPx} y={murTopOf(seg)} width={seg.Ls + 2 * epPx} height={yPlancher - murTopOf(seg)}
-              fill={mixHex(rgbHex(murDef.rgb), "#ffffff", 0.6 * t)} stroke="#78716c" />
+              fill={mixHex(rgbHex(sd?.rgb ?? murDef.rgb), "#ffffff", 0.6 * t)} stroke="#78716c" />
             ))}
             {/* visuel du revêtement (catalogue « Extérieur ») par-dessus la couleur, y compris
                 sur le triangle du pignon ; si l'image ne charge pas, la couleur reste visible */}
             {vis.murs && seg.face?.actif !== false && sd?.image && (
               <image href={sd.image} xlinkHref={sd.image} x={seg.x0s - epPx}
-                y={seg.toit.pignon ? seg.yTop - seg.hF : murTopOf(seg)}
-                width={seg.Ls + 2 * epPx} height={yPlancher - (seg.toit.pignon ? seg.yTop - seg.hF : murTopOf(seg))}
+                y={seg.toit.pignon ? seg.yToit - seg.hF : murTopOf(seg)}
+                width={seg.Ls + 2 * epPx} height={yPlancher - (seg.toit.pignon ? seg.yToit - seg.hF : murTopOf(seg))}
                 preserveAspectRatio="xMidYMid slice" clipPath={`url(#murClip-${i})`} />
             )}
             {vis.murs && seg.face?.actif !== false && sd?.image && t > 0 && (seg.toit.pignon ? (
-              <path d={`M ${seg.x0s - epPx} ${yPlancher} L ${seg.x0s - epPx} ${seg.yTop} L ${seg.toit.apexX} ${seg.yTop - seg.hF} L ${seg.x0s + seg.Ls + epPx} ${seg.yTop} L ${seg.x0s + seg.Ls + epPx} ${yPlancher} Z`}
+              <path d={`M ${seg.x0s - epPx} ${yPlancher} L ${seg.x0s - epPx} ${seg.yToit} L ${seg.toit.apexX} ${seg.yToit - seg.hF} L ${seg.x0s + seg.Ls + epPx} ${seg.yToit} L ${seg.x0s + seg.Ls + epPx} ${yPlancher} Z`}
                 fill="#ffffff" opacity={0.6 * t} stroke="none" />
             ) : (
               <rect x={seg.x0s - epPx} y={murTopOf(seg)} width={seg.Ls + 2 * epPx} height={yPlancher - murTopOf(seg)}
@@ -1689,8 +1812,8 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
             ))}
             {vis.murs && (
               <>
-            <line x1={seg.x0s} y1={seg.yTop} x2={seg.x0s} y2={yPlancher} stroke="#57534e" strokeWidth="1" strokeDasharray="5 4" />
-            <line x1={seg.x0s + seg.Ls} y1={seg.yTop} x2={seg.x0s + seg.Ls} y2={yPlancher} stroke="#57534e" strokeWidth="1" strokeDasharray="5 4" />
+            <line x1={seg.x0s} y1={seg.yToit} x2={seg.x0s} y2={yPlancher} stroke="#57534e" strokeWidth="1" strokeDasharray="5 4" />
+            <line x1={seg.x0s + seg.Ls} y1={seg.yToit} x2={seg.x0s + seg.Ls} y2={yPlancher} stroke="#57534e" strokeWidth="1" strokeDasharray="5 4" />
             {seg.face?.actif && seg.face.ouvertures.map((o, j) => (
               <rect key={j} x={ox(o, seg)} y={yPlancher - o.hauteur * scale}
                 width={o.largeur * scale} height={o.hauteur * scale}
@@ -1698,7 +1821,7 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
             ))}
               </>
             )}
-            {/* la toiture est rendue dans une seconde passe, au-dessus des charpentes */}
+            {/* la toiture (couverture) est rendue dans une seconde passe, au-dessus des charpentes */}
             {vis.murs && !seg.face?.actif && (() => {
               // charpente : sablière horizontale en sous-face de toiture (aussi en
               // vue est/ouest) ; en pignon elle est coupée par la ligne de toit
@@ -1707,7 +1830,9 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
               const cut = seg.toit.pignon && seg.toitVisible !== false ? `url(#toitCut-${i})` : undefined;
               return (
                 <g clipPath={cut}>
-                  <rect x={seg.x0s - epPx} y={seg.yTop - epC} width={seg.Ls + 2 * epPx} height={epC}
+                  {/* sablière dans l'axe des poteaux (±offPx de la ligne directrice, idem 3D),
+                      jusqu'aux bords EXTÉRIEURS des poteaux (axe ± epC/2) */}
+                  <rect x={seg.x0s - offPx - epC / 2} y={seg.yTop - epC} width={seg.Ls + 2 * offPx + epC} height={epC}
                     fill={col} stroke="#57534e" strokeWidth="1" />
                   <text x={seg.x0s + seg.Ls / 2} y={seg.yTop + seg.hM / 2} textAnchor="middle" fill="#a8a29e" fontSize="11">Charpente (pas de mur)</text>
                 </g>
@@ -1721,6 +1846,7 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
       {charpPosts.filter((p) => (p.seg.depth ?? 0) <= minDepth + 1e-6).map((p, i) => {
         const epC = Math.max(4, (charpente?.epaisseur ?? 0.20) * scale);
         return (
+          // le poteau s'arrête SOUS la sablière : son haut = bas de la poutre (yTop)
           <rect key={"fg-" + i} x={p.x - epC / 2} y={p.seg.yTop} width={epC} height={yPlancher - p.seg.yTop}
             fill={charpente?.image ? "url(#charpPatE)" : rgbHex(charpente?.rgb || [140, 107, 89])} stroke="#57534e" strokeWidth="1" pointerEvents="none" clipPath={p.cut} />
         );
@@ -1730,14 +1856,15 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
       {placed.map((seg, i) => {
         const t = maxDepth ? (seg.depth ?? 0) / maxDepth : 0;
         const vis = seg.vis || { murs: true, complexe_toiture: true, plancher: true, couverture: true };
-        if (!vis.complexe_toiture || seg.toitVisible === false) return null;
+        // toit rendu si complexe de toiture OU couverture visible (couches indépendantes)
+        if (!toitVisOf(vis) || seg.toitVisible === false) return null;
         return (
           <g key={(seg.traversant ? "trav-" : "") + (seg.inst?.id || i)}>
-            <path d={seg.toit.path} stroke={mixHex(rgbHex(toitRgb), "#ffffff", 0.6 * t)} strokeWidth={toitStrokePx} fill={seg.toit.fill} strokeLinejoin="round" strokeLinecap="butt" />
+            <path d={seg.toit.path} stroke={mixHex(seg.toit.contour || rgbHex(toitRgb), "#ffffff", 0.6 * t)} strokeWidth={toitStrokePx} fill={seg.toit.fill} strokeLinejoin="round" strokeLinecap="butt" />
             {vis.couverture && (() => {
               const im = couvImgOfSeg(seg);
               if (!im || seg.toit.fill === "none") return null;
-              const iy = seg.yTop - seg.hF - epToitPx - 6;
+              const iy = seg.yToit - seg.hF - epToitPx - 6;
               return (
                 <image href={im} xlinkHref={im} x={seg.x0s - epPx - depPx} y={iy}
                   width={seg.Ls + 2 * epPx + 2 * depPx} height={seg.hF + epToitPx + 12}
@@ -1757,7 +1884,7 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
                 const x = ox(f, seg);
                 const wPx = f.largeur * scale;
                 const hVert = Math.max(6, f.hauteur * sinP * scale);
-                const yLow = seg.yTop - dWin * tanP * scale;
+                const yLow = seg.yToit - dWin * tanP * scale;
                 return (
                   <rect key={j} x={x} y={yLow - hVert} width={wPx} height={hVert}
                     fill="#ffffff" stroke="#2563eb" strokeWidth="1.5" rx="1"
@@ -1790,7 +1917,7 @@ const Field = ({ label, children }) => (
 /* Choix d'un revêtement : liste déroulante compacte (comme avant) + petit visuel
    du revêtement actuellement sélectionné à côté (bien plus petit que les grandes
    vignettes des listes de « Réglages généraux ») */
-const RevetSelect = ({ label, value, onChange, options, defaultLabel }) => {
+const RevetSelect = ({ label, value, onChange, options, defaultLabel, allowNone }) => {
   const cur = options.find((o) => o.id === value);
   const img = cur?.image || "";
   return (
@@ -1798,9 +1925,10 @@ const RevetSelect = ({ label, value, onChange, options, defaultLabel }) => {
       <div className="revet-select-row">
         {img
           ? <img src={img} alt="" className="revet-thumb-sm" />
-          : <span className="revet-thumb-sm revet-thumb-sm-empty" />}
-        <select value={value ?? ""} onChange={(e) => onChange(e.target.value || null)}>
+          : <span className="revet-thumb-sm revet-thumb-sm-empty" style={cur?.rgb ? { background: rgbHex(cur.rgb) } : undefined} />}
+        <select value={value ?? ""} onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}>
           {defaultLabel && <option value="">{defaultLabel}</option>}
+          {allowNone && <option value="none">Pas de revêtement</option>}
           {options.map((o) => <option key={o.id} value={o.id}>{o.nom}</option>)}
         </select>
       </div>
@@ -3214,12 +3342,12 @@ export default function App() {
             <RevetSelect label="Revêtement supérieur (catalogue « Intérieur »)"
               value={intIdOf(env, d.revetementPlancher, plancherSel?.revetement_sup)}
               onChange={(v) => setD((prev) => ({ ...prev, revetementPlancher: v }))}
-              options={intListOf(env)} />
+              options={intListOf(env)} allowNone />
             <RevetSelect label="Revêtement des chants (catalogue « Extérieur »)"
               value={d.revetementChantPlancher ?? plancherSel?.revetement_chants ?? murSel?.surface ?? ""}
               onChange={(v) => setD((prev) => ({ ...prev, revetementChantPlancher: v }))}
               options={env.facades}
-              defaultLabel={`Par défaut — ${surfaceNom(d.revetementChantPlancher ?? plancherSel?.revetement_chants ?? murSel?.surface ?? "")}`} />
+              defaultLabel={`Par défaut — ${surfaceNom(d.revetementChantPlancher ?? plancherSel?.revetement_chants ?? murSel?.surface ?? "")}`} allowNone />
           </div>
         </div>
       </div>
@@ -3273,12 +3401,12 @@ export default function App() {
               value={face.surface ?? murSel?.surface ?? ""}
               onChange={(v) => setFace(planSel, { surface: v })}
               options={env.facades}
-              defaultLabel={`Par défaut — ${surfaceNom(face.surface ?? murSel?.surface ?? "")}`} />
+              defaultLabel={`Par défaut — ${surfaceNom(face.surface ?? murSel?.surface ?? "")}`} allowNone />
             <RevetSelect label="Revêtement intérieur"
               value={face.surfaceInt ?? ""}
               onChange={(v) => setFace(planSel, { surfaceInt: v })}
               options={intListOf(env)}
-              defaultLabel={`Par défaut — ${intNom(intIdOf(env, face.surfaceInt, murSel?.interieur))}`} />
+              defaultLabel={`Par défaut — ${intNom(intIdOf(env, face.surfaceInt, murSel?.interieur))}`} allowNone />
             </>
             )}
             {selIsToiture && (
@@ -3298,7 +3426,7 @@ export default function App() {
                         },
                       }))}
                       options={couvListOf(env)}
-                      defaultLabel={`Par défaut — ${couvNom(couvIdOf(env, null, toitureDef.couverture ?? toitureDef.surface))}`} />
+                      defaultLabel={`Par défaut — ${couvNom(couvIdOf(env, null, toitureDef.couverture ?? toitureDef.surface))}`} allowNone />
                     <RevetSelect label={`Revêtement intérieur (sous-face) — pent ${p.numero}`}
                       value={d.surfacesIntToiture?.[p.instId]?.[p.versant] ?? ""}
                       onChange={(v) => setD((prev) => ({
@@ -3309,7 +3437,7 @@ export default function App() {
                         },
                       }))}
                       options={intListOf(env)}
-                      defaultLabel={`Par défaut — ${intNom(intIdOf(env, d.surfacesIntToiture?.[p.instId]?.[p.versant], toitureDef.interieur))}`} />
+                      defaultLabel={`Par défaut — ${intNom(intIdOf(env, d.surfacesIntToiture?.[p.instId]?.[p.versant], toitureDef.interieur))}`} allowNone />
                   </div>
                 );
               })()
