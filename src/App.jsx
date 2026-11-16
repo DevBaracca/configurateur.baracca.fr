@@ -814,15 +814,31 @@ function buildExport(d, env) {
   const formeDef = formeDefOf(d, env);
   const isoDef = env.isolations?.find((x) => x.id === d.isolation) || null;
   const surfaceDef = env.facades.find((f) => f.id === murDef.surface) || env.facades[0];
-  const exportFace = (face, f, instId) => ({
+  // Couche de revêtement : id + nom + favori Archicad + épaisseur (m)
+  const coucheRev = (list, id, fallback) => {
+    const it = list.find((x) => x.id === (id ?? fallback)) || list.find((x) => x.id === fallback) || list[0] || {};
+    return { id: it.id ?? "", nom: it.nom ?? "", favori: it.favori ?? "", epaisseur: +(it.epaisseur ?? 0) };
+  };
+  const exportFace = (face, f, instId) => {
+    const revExt = coucheRev(env.facades, face.surface, murDef.surface); // revêtement EXTÉRIEUR
+    const revInt = coucheRev(intListOf(env), face.surfaceInt, murDef.interieur); // revêtement INTÉRIEUR
+    return {
     actif: face.actif,
     nature: face.actif ? "mur" : "charpente", // charpente = pas de mur sur ce côté
     type: murDef.nom,
     epaisseur: murDef.epaisseur,
     materiau: murDef.materiau ?? surfaceDef.nom,
-    surface: (env.facades.find((f) => f.id === (face.surface ?? murDef.surface)) || env.facades[0]).nom, // revêtement extérieur choisi pour ce mur
-    surfaceInterieur: (intListOf(env).find((i) => i.id === intIdOf(env, face.surfaceInt, murDef.interieur)) || {}).nom ?? "", // revêtement intérieur du mur
+    surface: revExt.nom, // revêtement extérieur choisi pour ce mur
+    surfaceInterieur: revInt.nom, // revêtement intérieur du mur
     favori: murDef.favori ?? "", // favori Archicad pour ce mur
+    // Pile de 3 couches superposées (intérieur -> extérieur), chacune avec sa
+    // référence Archicad et son épaisseur — consommée par baracca-import.py :
+    // mur = [revêtement intérieur, mur catalogue, revêtement extérieur]
+    couches: [
+      { role: "interieur", ...revInt },
+      { role: "mur", id: murDef.id, nom: murDef.nom, favori: murDef.favori ?? "", epaisseur: +(murDef.epaisseur ?? 0) },
+      { role: "exterieur", ...revExt },
+    ],
     longueur: murLongueur(d, f.key),
     hauteur: d.hauteur,
     facade: d.facade,
@@ -834,7 +850,8 @@ function buildExport(d, env) {
       position: o.position,
       favori: env.menuiseries?.find((x) => x.id === o.menuiserieId)?.favori ?? "", // favori Archicad de la menuiserie
     })),
-  });
+    };
+  };
   const insts = d.instances?.length ? d.instances : [{ id: "m0", x: 0, y: 0, moduleId: d.moduleId, murs: modelMurs() }];
   // murs du module initial (rétro-compatibilité schéma 1.0)
   const mursData = {};
@@ -881,6 +898,14 @@ function buildExport(d, env) {
         // référence la ligne directrice des murs (de chaque côté)
         longueur: +(spanXm(d, env) + 2 * PLANCHER_DEPASSEMENT).toFixed(3),
         largeur: +(spanYm(d, env) + 2 * PLANCHER_DEPASSEMENT).toFixed(3),
+        // Pile de 2 couches superposées (supérieur -> plancher) + chants :
+        // plancher = [revêtement supérieur, plancher catalogue], les chants
+        // sont le revêtement de la tranche (côté)
+        couches: [
+          { role: "superieur", ...coucheRev(intListOf(env), d.revetementPlancher, plancherDef.revetement_sup) },
+          { role: "plancher", id: plancherDef.id, nom: plancherDef.nom, favori: plancherDef.favori ?? "", epaisseur: +epaisseurPlancher(d, env.planchers).toFixed(3) },
+        ],
+        chants: coucheRev(env.facades, d.revetementChantPlancher, plancherDef.revetement_chants ?? murDef.surface),
       },
       facade: {
         nom: facadeDef.nom,
@@ -891,11 +916,22 @@ function buildExport(d, env) {
         geometrie: toitType, // monopente / deuxpentes / quatrepentes / terrasse
         forme: formeDef ? { id: formeDef.id, nom: formeDef.nom } : null, // forme de toiture du module (catalogue « formes »)
         favori: toitureDef.favori ?? "", // favori Archicad pour la toiture
+        // Pile de 3 couches superposées (haut -> bas) : toiture =
+        // [revêtement toiture (seul avec débord), complexe de toiture,
+        // revêtement inférieur (sous-face)] — consommée par baracca-import.py
+        couches: [
+          { role: "couverture", ...coucheRev(couvListOf(env), null, toitureDef.couverture ?? toitureDef.surface), depassee: +(Math.max(0, +(d.depassee ?? formeDef?.depassee ?? +(toitureDef.epaisseur ?? 0.30) * 100)) / 100).toFixed(3) },
+          { role: "complexe", id: toitureDef.id, nom: toitureDef.nom, favori: toitureDef.favori ?? "", epaisseur: +(+(toitureDef.epaisseur ?? 0.30)).toFixed(3) },
+          { role: "inferieur", ...coucheRev(intListOf(env), null, toitureDef.interieur) },
+        ],
         pents: pentsOf(d, env).map((p) => ({
           numero: p.numero, module: p.instIndex, versant: p.versant,
           surface: (couvListOf(env).find((f) => f.id === p.surfaceId) || couvListOf(env)[0])?.nom ?? "", // revêtement de toiture (catalogue « Toiture »)
+          // revêtement de toiture choisi pour CE pent, avec favori + épaisseur
+          couverture: coucheRev(couvListOf(env), p.surfaceId, toitureDef.couverture ?? toitureDef.surface),
           surface_m2: +p.area.toFixed(2),
           surfaceInterieur: (intListOf(env).find((i) => i.id === p.surfaceIntId) || {}).nom ?? "", // revêtement intérieur (sous-face du pent)
+          interieur: coucheRev(intListOf(env), p.surfaceIntId, toitureDef.interieur), // sous-face de CE pent, avec favori + épaisseur
           surfaceInterieur_m2: +(p.areaBaseInt ?? p.areaBase ?? p.area).toFixed(2), // sous-face intérieure : - 2 épaisseurs de mur, sans débords
           // fenêtres de toit posées sur ce pent (position le long du bas de pente)
           fenetres: fenetresOfPent(d, p.instId, p.versant).map((f, i) => ({

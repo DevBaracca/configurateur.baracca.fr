@@ -764,6 +764,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $fields['epaisseur'] = $epaisseur;
         }
+        if (in_array($sous, ['surfaces', 'interieurs', 'couvertures'], true)) {
+            // Revêtements (Extérieur / Intérieur / Toiture) : à l'identique du
+            // catalogue, chaque revêtement porte une référence Archicad et une
+            // épaisseur. Saisie en cm (précision mm) — stockage en m.
+            $fields['favori'] = trim((string) ($_POST['favori'] ?? ''));
+            $epaisseur = round(cat_num('epaisseur') / 100, 3);
+            if ($epaisseur <= 0) {
+                cat_redirect($sous, 'invalid');
+            }
+            $fields['epaisseur'] = $epaisseur;
+        }
         // La géométrie de la toiture ne se règle plus ici (rubrique « Formes »)
         $item = archicad_catalogue_upsert($sous, $fields, $id !== '' ? $id : null);
         // Chaque rubrique a son propre onglet : on y retourne après sauvegarde
@@ -1972,8 +1983,8 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
     <?php
       // Carte « Revêtements » : trois onglets — Extérieur (surfaces, habillage
       // des murs), Intérieur (murs + sous-face de toiture) et Toiture
-      // (couvertures, par pent). Mêmes champs : visuel, nom, tarif au m² ;
-      // pas de référence Archicad pour ces rubriques.
+      // (couvertures, par pent). Mêmes champs que le catalogue : visuel, nom,
+      // épaisseur, tarif au m², référence Archicad.
       $revOnglets = [
         'surfaces' => [
           'label' => 'Extérieur', 'items' => $facades,
@@ -2002,13 +2013,13 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
     ?>
     <div class="admin-card">
       <h2><?= $rev['label'] ?> (<?= count($revItems) ?>) <?= cat_btn_add('configurateur.php?section=' . $section . '&new=1', $rev['add']) ?></h2>
-      <p class="admin-hint"><?= $rev['hint'] ?> Pas de référence Archicad pour cette rubrique.</p>
+      <p class="admin-hint"><?= $rev['hint'] ?></p>
       <?php if ($revItems === []): ?>
         <p class="admin-hint"><?= $rev['empty'] ?></p>
       <?php else: ?>
         <table class="admin-table">
           <thead>
-            <tr><th>Visuel</th><th>Nom</th><th>Coût au m²</th><th>Actions</th></tr>
+            <tr><th>Visuel</th><th>Nom</th><th>Épaisseur</th><th>Coût au m²</th><th>Référence Archicad</th><th>Actions</th></tr>
           </thead>
           <tbody>
             <?php foreach ($revItems as $f): ?>
@@ -2021,7 +2032,9 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
                   <?php endif; ?>
                 </td>
                 <td><strong><?= htmlspecialchars((string) $f['nom']) ?></strong></td>
+                <td><?= cat_cm((float) ($f['epaisseur'] ?? 0)) ?></td>
                 <td><?= cat_eur((float) ($f['tarif'] ?? 0)) ?> €/m²</td>
+                <td><?= ($f['favori'] ?? '') !== '' ? htmlspecialchars((string) $f['favori']) : '—' ?></td>
                 <td class="admin-actions">
                   <?= cat_action_edit('configurateur.php?section=' . $section . '&edit=' . urlencode((string) $f['id'])) ?>
                   <?= cat_action_delete('configurateur.php?section=' . $section, $csrf, 'delete_enveloppe', (string) $f['id'], $rev['del'], '<input type="hidden" name="sous" value="' . $section . '">') ?>
@@ -2061,6 +2074,20 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
           <div class="admin-form-row">
             <label for="fa-tarif">Coût au m² (€/m²)</label>
             <input type="number" id="fa-tarif" name="tarif" step="0.01" min="0" value="<?= cat_env_field($editEnv, $section, 'tarif', '0') ?>">
+          </div>
+        </div>
+        <hr class="admin-sep">
+        <div class="modal-row">
+          <div class="admin-form-row">
+            <label for="fa-epaisseur">Épaisseur (cm)</label>
+            <input type="number" id="fa-epaisseur" name="epaisseur" step="0.1" min="0.1" required value="<?= htmlspecialchars($editEnv['item'] ? cat_cm_input((float) ($editEnv['item']['epaisseur'] ?? 0.02)) : '2') ?>">
+          </div>
+        </div>
+        <hr class="admin-sep">
+        <div class="modal-row">
+          <div class="admin-form-row">
+            <label for="fa-favori">Référence Archicad</label>
+            <input type="text" id="fa-favori" name="favori" value="<?= cat_env_field($editEnv, $section, 'favori') ?>" placeholder="Nom de la référence Archicad (ex. Baracca — Bardage bois), vide = aucune">
           </div>
         </div>
         <div class="admin-actions">

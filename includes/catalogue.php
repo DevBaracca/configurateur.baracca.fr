@@ -242,31 +242,34 @@ function archicad_catalogue_defaults(string $kind): array
         case 'surfaces':
             // Surfaces = revêtements d'habillage EXTÉRIEUR des murs : visuel
             // téléversé depuis le back-office (image), utilisé dans les
-            // élévations. Pas de favori. Onglet « Extérieur » du back-office.
+            // élévations, épaisseur (m), tarif au m², favori Archicad.
+            // Onglet « Extérieur » du back-office.
             return [
-                ['id' => 'bardage_bois', 'nom' => 'Bardage bois', 'image' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'enduit', 'nom' => 'Enduit minéral', 'image' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'tole', 'nom' => 'Tôle nervurée', 'image' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'brique', 'nom' => 'Brique de parement', 'image' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'bardage_bois', 'nom' => 'Bardage bois', 'image' => '', 'epaisseur' => 0.02, 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'enduit', 'nom' => 'Enduit minéral', 'image' => '', 'epaisseur' => 0.015, 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'tole', 'nom' => 'Tôle nervurée', 'image' => '', 'epaisseur' => 0.005, 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'brique', 'nom' => 'Brique de parement', 'image' => '', 'epaisseur' => 0.09, 'favori' => '', 'tarif' => 0, 'created' => $today],
             ];
         case 'interieurs':
             // Revêtements INTÉRIEURS (murs + sous-face de toiture), onglet
-            // « Intérieur » : visuel, nom, tarif au m² — le tarif est ajouté
-            // au chiffrage des murs et du complexe de toiture. Pas de favori.
+            // « Intérieur » : visuel, nom, épaisseur (m), tarif au m² — le
+            // tarif est ajouté au chiffrage des murs et du complexe de
+            // toiture, favori Archicad.
             return [
-                ['id' => 'placo_ba13', 'nom' => 'Placo BA13 + peinture', 'image' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'lambris_bois', 'nom' => 'Lambris bois', 'image' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'lambris_pvc', 'nom' => 'Lambris PVC', 'image' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'placo_ba13', 'nom' => 'Placo BA13 + peinture', 'image' => '', 'epaisseur' => 0.013, 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'lambris_bois', 'nom' => 'Lambris bois', 'image' => '', 'epaisseur' => 0.02, 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'lambris_pvc', 'nom' => 'Lambris PVC', 'image' => '', 'epaisseur' => 0.01, 'favori' => '', 'tarif' => 0, 'created' => $today],
             ];
         case 'couvertures':
             // Couvertures de TOITURE (revêtement de toiture, choisi par pent),
-            // onglet « Toiture » : visuel, nom, tarif au m² appliqué à la
-            // surface AVEC débords (ligne « Couverture » du chiffrage).
+            // onglet « Toiture » : visuel, nom, épaisseur (m), tarif au m²
+            // appliqué à la surface AVEC débords (ligne « Couverture » du
+            // chiffrage), favori Archicad.
             return [
-                ['id' => 'bardeaux_bois', 'nom' => 'Bardeaux bois', 'image' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'joint_debout', 'nom' => 'Tôle joint debout', 'image' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'tuiles_terre_cuite', 'nom' => 'Tuiles terre cuite', 'image' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'epdm', 'nom' => 'Membrane EPDM (terrasse)', 'image' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'bardeaux_bois', 'nom' => 'Bardeaux bois', 'image' => '', 'epaisseur' => 0.04, 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'joint_debout', 'nom' => 'Tôle joint debout', 'image' => '', 'epaisseur' => 0.005, 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'tuiles_terre_cuite', 'nom' => 'Tuiles terre cuite', 'image' => '', 'epaisseur' => 0.05, 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'epdm', 'nom' => 'Membrane EPDM (terrasse)', 'image' => '', 'epaisseur' => 0.005, 'favori' => '', 'tarif' => 0, 'created' => $today],
             ];
         case 'toitures':
             // Rubrique toiture : épaisseur (m) dessinée au-dessus de la ligne
