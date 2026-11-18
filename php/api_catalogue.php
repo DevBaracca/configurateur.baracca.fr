@@ -18,9 +18,11 @@ echo json_encode([
         'modules' => archicad_load_catalogue('modules'),
         'isolation' => archicad_load_catalogue('isolation'),
         'systemes_aut' => archicad_load_catalogue('systemes_aut'), // systèmes autonomes (zone Catalogue)
+        'equipements' => archicad_load_catalogue('equipements'),   // équipements (zone Catalogue)
         'fenetres_toit' => archicad_load_catalogue('fenetres_toit'), // fenêtres de toit (zone Catalogue)
         'promotions' => archicad_load_catalogue('promotions'),       // codes promo (zone Structure)
         'autonomie' => archicad_load_catalogue('autonomie'),       // packs autonomie (zone Structure)
+        'amenagements' => archicad_load_catalogue('amenagements'), // packs aménagements = listes d'équipements (zone Structure)
         'formes' => archicad_load_catalogue('formes'),
         'charpentes' => archicad_load_catalogue('charpentes'),
         'enveloppe' => [
@@ -29,6 +31,7 @@ echo json_encode([
             'surfaces' => archicad_load_catalogue('surfaces'),       // revêtements Extérieur
             'interieurs' => archicad_load_catalogue('interieurs'),   // revêtements Intérieur
             'couvertures' => archicad_load_catalogue('couvertures'), // revêtements Toiture (couverture)
+            'rev_plancher' => archicad_load_catalogue('rev_plancher'), // revêtements Plancher (supérieur + chants)
         ],
         'toitures' => archicad_catalogue_toitures(),
         'marges' => archicad_marges_all(), // coefficient de marge par rubrique (défaut 1)

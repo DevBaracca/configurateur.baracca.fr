@@ -4,7 +4,8 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
   bboxOf, dimsOf, epaisseurPlancher, toitureDefOf, formeDefOf, toitTypeOf,
   pente1Of, pente2Of, hauteurFaitageDm, basPenteOf, penteOfPent, fenetresOfPent,
-  couvListOf, couvIdOf, intListOf, intIdOf, rgbHex, mixHex, SOL_SOUS_PLANCHER, toitVisOf,
+  couvListOf, couvIdOf, intListOf, intIdOf, plancherListOf, plancherIdOf, chantListOf, revIdOf,
+  rgbHex, mixHex, SOL_SOUS_PLANCHER, toitVisOf,
   PLANCHER_DEPASSEMENT,
 } from "./App.jsx";
 
@@ -111,7 +112,7 @@ function buildScene(d, env) {
     return t;
   };
   if (charpenteDef?.image) { charpMat.map = textureFor(charpenteDef.image); charpMat.color.set(0xffffff); } // visuel charpente sur poteaux/sablières
-  const surfItemOf = (inst, face) => env.facades.find((f) => f.id === (inst?.murs?.[face]?.surface ?? murDef?.surface));
+  const surfItemOf = (inst, face) => env.facades.find((f) => f.id === revIdOf(env.facades, inst?.murs?.[face]?.surface, murDef?.surface));
   // revêtement INTÉRIEUR de la face (catalogue « Intérieur », sous-face des murs côté 3D)
   const intItemOf = (inst, face) => intListOf(env).find((f) => f.id === intIdOf(env, inst?.murs?.[face]?.surfaceInt, murDef?.interieur));
   const matWithMap = (url, base) => {
@@ -209,19 +210,39 @@ function buildScene(d, env) {
     const pN = sh0.nord ? ep / 2 : PLANCHER_DEPASSEMENT, pS = sh0.sud ? ep / 2 : PLANCHER_DEPASSEMENT;
     const pE = sh0.est ? ep / 2 : PLANCHER_DEPASSEMENT, pW = sh0.ouest ? ep / 2 : PLANCHER_DEPASSEMENT;
     if (vis.plancher) {
-      // dessus du plancher = revêtement Intérieur choisi ; chants = revêtement Extérieur choisi
-      const hautItem = intListOf(env).find((f) => f.id === intIdOf(env, d.revetementPlancher, plancherDef?.revetement_sup));
-      const chantItem = env.facades.find((f) => f.id === (d.revetementChantPlancher ?? plancherDef?.revetement_chants ?? murDef?.surface));
+      // dessus du plancher = revêtement « Plancher » choisi ; chants (bords) =
+      // même revêtement par défaut (étoile de l'onglet « Plancher »)
+      const hautItem = plancherListOf(env).find((f) => f.id === plancherIdOf(env, d.revetementPlancher, plancherDef?.revetement_sup));
+      const chantItem = chantListOf(env).find((f) => f.id === revIdOf(chantListOf(env), d.revetementChantPlancher, plancherDef?.revetement_chants ?? murDef?.surface));
       // sans visuel : couleur du revêtement, sinon gris clair
       const matTop = hautItem?.image ? matWithMap(hautItem.image, plancherMat) : matCouleur(plancherMat, hautItem?.rgb, [214, 211, 209]);
       const matSide = chantItem?.image ? matWithMap(chantItem.image, plancherMat) : matCouleur(plancherMat, chantItem?.rgb, [214, 211, 209]);
-      // BoxGeometry : [+x, -x, +y(dessus), -y, +z, -z]
+      const Lx = dm.longueur + pW + pE, Lz = dm.largeur + pN + pS;
+      // BoxGeometry : [+x, -x, +y(dessus), -y, +z, -z] — côtés = dalle nue,
+      // le dessus reçoit le revêtement supérieur choisi
       const pl = new THREE.Mesh(
-        new THREE.BoxGeometry(dm.longueur + pW + pE, epP, dm.largeur + pN + pS),
-        [matSide, matSide, matTop, plancherMat, matSide, matSide]
+        new THREE.BoxGeometry(Lx, epP, Lz),
+        [plancherMat, plancherMat, matTop, plancherMat, plancherMat, plancherMat]
       );
       pl.position.set(X0 + dm.longueur / 2, -epP / 2, Z0 + dm.largeur / 2);
       scene.add(pl);
+      // revêtement des chants (bords) : un élément rajouté sur chaque face du
+      // plancher, d'épaisseur = épaisseur du revêtement de chant choisi ;
+      // PAS de bande sur un côté commun à un module accolé (sh0)
+      const epRev = Math.max(0, +(chantItem?.epaisseur ?? 0));
+      if (epRev > 0) {
+        const cx = X0 + dm.longueur / 2, cz = Z0 + dm.largeur / 2;
+        const bandes = [];
+        if (!sh0.nord) bandes.push({ w: Lx, d: epRev, x: cx, z: Z0 - pN - epRev / 2 });            // nord
+        if (!sh0.sud) bandes.push({ w: Lx, d: epRev, x: cx, z: Z1 + pS + epRev / 2 });              // sud
+        if (!sh0.ouest) bandes.push({ w: epRev, d: Lz - 2 * epRev, x: X0 - pW - epRev / 2, z: cz }); // ouest
+        if (!sh0.est) bandes.push({ w: epRev, d: Lz - 2 * epRev, x: X1 + pE + epRev / 2, z: cz });   // est
+        for (const b of bandes) {
+          const bande = new THREE.Mesh(new THREE.BoxGeometry(b.w, epP, b.d), matSide);
+          bande.position.set(b.x, -epP / 2, b.z);
+          scene.add(bande);
+        }
+      }
     }
     const t1 = Math.tan(rad(p1)), t2 = Math.tan(rad(p2));
     const Hr = H + epToitV; // dessus de la dalle au droit de la ligne directrice (sous-face à H = dessus des murs)

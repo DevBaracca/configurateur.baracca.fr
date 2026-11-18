@@ -135,7 +135,7 @@
 # v2.25 : éléments en PILES DE COUCHES (champ « couches » de l'export, chaque
 # couche = {role, favori, epaisseur}) : mur = 3 murs décalés [rev. intérieur,
 # mur catalogue, rev. extérieur] ; plancher = 2 dalles [rev. supérieur sur
-# plancher] + chants (non créés) ; toiture = 3 toits [couverture AVEC débord,
+# plancher] + bandes de chant créées (v2.27, champ « chantsFaces ») ; toiture = 3 toits [couverture AVEC débord,
 # complexe, sous-face]. Débord uniquement sur la couche couverture. SEO : toutes
 # les couches de mur découpées par la couverture. Repli : sans « couches »,
 # ancien comportement (1 mur / 1 dalle / 2 toits).
@@ -1476,7 +1476,8 @@ def import_module(data, pick_origin=False):
 
     # --- 2. Planchers (par module, avec débord) -----------------------------
     # v2.25 : plancher = 2 dalles superposées [revêtement supérieur, plancher
-    # catalogue] (+ chants, non créés dans Archicad). Repli : une seule dalle.
+    # catalogue]. v2.27 : + bandes de chant créées (section 2b, chantsFaces).
+    # Repli : une seule dalle.
     nom_plancher = plancher_nom(module)
     pl_obj = module.get("plancher") if isinstance(module.get("plancher"), dict) else {}
     favori_pl = favori_de(pl_obj, FAVORIS_PLANCHER, nom_plancher)
@@ -1519,6 +1520,59 @@ def import_module(data, pick_origin=False):
             if e.get("error")]
     if errs:
         print(f"  ! Plancher(s) non créé(s) : {errs}")
+
+    # --- 2b. Bandes de chant du plancher (champ « chantsFaces » de l'export) --
+    # v2.27 : une bande PAR FACE de module (les côtés communs à deux modules
+    # accolés sont déjà exclus côté export). Chaque bande est créée comme un
+    # poteau allongé : section = longueur du bord x épaisseur du revêtement de
+    # chant choisi, hauteur = épaisseur du plancher, base à -ep_plancher (la
+    # bande couvre exactement la tranche de la dalle, de -ep à 0).
+    chants_faces = [c for c in (pl_obj.get("chantsFaces") or []) if isinstance(c, dict)]
+    if chants_faces:
+        unites_par_id = {(u.get("id") or "m0"): u for u in unites}
+        cols_chant = []
+        for cf in chants_faces:
+            unite = unites_par_id.get(cf.get("instId")) or unites[0]
+            dims_u = unite["dimensions"]
+            L, l = float(dims_u["longueur"]), float(dims_u["largeur"])
+            bx, by = float(unite.get("x", 0.0)), float(unite.get("y", 0.0))
+            rev = cf.get("revetement") if isinstance(cf.get("revetement"), dict) else {}
+            ep_ch = float(rev.get("epaisseur") or 0.0)
+            if ep_ch <= 0:
+                continue
+            face = str(cf.get("face") or "")
+            # bord EXTÉRIEUR de la dalle (ligne directrice + débord dL/dl) ;
+            # le poteau étant centré sur son point, on décale d'une
+            # demi-épaisseur de revêtement vers l'extérieur (coord. EXPORT, +Y = Sud)
+            if face == "nord":
+                cx, cy, w, d = bx + L / 2, by - dl - ep_ch / 2, L + 2 * dL, ep_ch
+            elif face == "sud":
+                cx, cy, w, d = bx + L / 2, by + l + dl + ep_ch / 2, L + 2 * dL, ep_ch
+            elif face == "ouest":
+                cx, cy, w, d = bx - dL - ep_ch / 2, by + l / 2, ep_ch, l + 2 * dl
+            elif face == "est":
+                cx, cy, w, d = bx + L + dL + ep_ch / 2, by + l / 2, ep_ch, l + 2 * dl
+            else:
+                continue
+            p = tr((cx, cy))
+            item = {"coordinates": {"x": p["x"], "y": p["y"], "z": -ep_plancher},
+                    "height": ep_plancher, "width": w, "depth": d}
+            fav_ch = str(rev.get("favori") or "").strip()
+            if fav_ch:
+                item["favoriteName"] = fav_ch
+            cols_chant.append((item, fav_ch))
+        if cols_chant:
+            print(f"Création de {len(cols_chant)} bande(s) de chant de plancher…")
+            try:
+                resp = bridge.tapir_cree("CreateColumns",
+                                        {"columnsData": [it for it, _ in cols_chant]})
+                for (it, fav), e in zip(cols_chant, resp.get("elements", [])):
+                    if e.get("elementId") is not None and fav:
+                        fav_a_appliquer.append((e["elementId"], fav, None))
+                n_ok = sum(1 for e in resp.get("elements", []) if e.get("elementId") is not None)
+                print(f"  -> {n_ok}/{len(cols_chant)} bande(s) créée(s).")
+            except Exception as exc:
+                print(f"  ! CreateColumns (chants) en échec ({exc}) : bandes non créées.")
 
     # --- 3. Toitures (PAR module, superposées : complexe + couverture) ------
     # - complexe de toiture : empreinte sur la LIGNE DIRECTRICE, niveau H ;

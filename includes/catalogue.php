@@ -4,15 +4,24 @@
  * Catalogues du configurateur (data/catalogue/, un fichier JSON par rubrique :
  * menuiseries.json, modules.json, isolation.json, formes.json, charpentes.json,
  * murs.json, planchers.json, surfaces.json, interieurs.json, couvertures.json,
- * toitures.json, systemes_aut.json, autonomie.json, fenetres_toit.json) :
+ * toitures.json, systemes_aut.json, autonomie.json, fenetres_toit.json,
+ * equipements.json, amenagements.json, rev_plancher.json) :
  * menuiseries (baies
  * vitrées, fenêtres, portes — avec visuel), modèles de modules (géométrie
  * prédéfinie uniquement), isolations (type de mur + plancher + toiture),
  * formes de toiture (géométrie, pentes), charpentes, murs, planchers, toitures,
  * revêtements (« surfaces » = EXTÉRIEUR des murs, « interieurs » = INTÉRIEUR,
- * « couvertures » = TOITURE par pent), systèmes autonomes (« systemes_aut » :
+ * « couvertures » = TOITURE par pent) — dans chaque rubrique de la zone
+ * « Revêtements », c'est l'élément marqué « par défaut » (étoile) qui est
+ * appliqué côté client quand aucun revêtement n'est choisi explicitement,
+ * systèmes autonomes (« systemes_aut » :
  * visuel, nom, dimensions, coût unitaire) et « autonomie » (liste de systèmes
- * autonomes choisie côté client). Chaque élément porte un tarif, additionné
+ * autonomes choisie côté client), équipements (« equipements » : idem
+ * systèmes autonomes) regroupés en « packs » dans « amenagements » (liste
+ * d'équipements, zone Structure, sur le même principe que « autonomie »), et
+ * revêtements de plancher (« rev_plancher » = revêtement supérieur du plancher
+ * et côtés/chants du plancher, onglet « Plancher » de la zone Revêtements).
+ * Chaque élément porte un tarif, additionné
  * par le configurateur pour afficher le tarif global du projet.
  *
  * Gérés depuis le back-office (admin/configurateur.php), lus par
@@ -25,7 +34,8 @@ require_once __DIR__ . '/../config.php';
 // Chaque kind a son propre fichier JSON dans data/catalogue/ :
 // menuiseries.json, modules.json, isolation.json, formes.json, charpentes.json,
 // murs.json, planchers.json, surfaces.json, interieurs.json, couvertures.json,
-// toitures.json, systemes_aut.json, autonomie.json, fenetres_toit.json
+// toitures.json, systemes_aut.json, autonomie.json, fenetres_toit.json,
+// equipements.json, amenagements.json, rev_plancher.json
 // (structure {"items": [...]}).
 function archicad_catalogue_dir(): string
 {
@@ -199,6 +209,37 @@ function archicad_catalogue_defaults(string $kind): array
             return [
                 ['id' => 'autonomie-standard', 'nom' => 'Autonomie standard', 'defaut' => true, 'systemes' => array_slice(array_column($sys, 'id'), 0, 2), 'image' => '', 'favori' => '', 'created' => $today],
             ];
+        case 'equipements':
+            // Équipements (onglet « Equipements », zone Catalogue) : à
+            // l'identique des systèmes autonomes (visuel, nom, dimensions en
+            // m, favori Archicad) avec un coût UNITAIRE. Regroupés en « packs »
+            // dans la rubrique « Aménagements » (zone Structure).
+            return [
+                ['id' => 'vmc-double-flux', 'nom' => 'VMC double flux', 'largeur' => 0.60, 'hauteur' => 0.30, 'favori' => '', 'tarif' => 0, 'image' => '', 'created' => $today],
+                ['id' => 'chauffe-eau-thermo', 'nom' => 'Chauffe-eau thermodynamique 200 L', 'largeur' => 0.60, 'hauteur' => 1.60, 'favori' => '', 'tarif' => 0, 'image' => '', 'created' => $today],
+                ['id' => 'climatisation', 'nom' => 'Climatisation réversible', 'largeur' => 0.80, 'hauteur' => 0.25, 'favori' => '', 'tarif' => 0, 'image' => '', 'created' => $today],
+                ['id' => 'store-banne', 'nom' => 'Store banne 3,00 m', 'largeur' => 3.00, 'hauteur' => 0.20, 'favori' => '', 'tarif' => 0, 'image' => '', 'created' => $today],
+            ];
+        case 'amenagements':
+            // Aménagements (zone Structure) : un « pack » = liste d'équipements
+            // (références vers le catalogue « Equipements »), sur le même
+            // principe que « autonomie » / « systèmes Aut. »
+            $eq = archicad_load_catalogue('equipements');
+            return [
+                ['id' => 'amenagement-standard', 'nom' => 'Aménagement standard', 'defaut' => true, 'equipements' => array_slice(array_column($eq, 'id'), 0, 2), 'image' => '', 'favori' => '', 'created' => $today],
+            ];
+        case 'rev_plancher':
+            // Revêtements de plancher (onglet « Plancher », zone Revêtements) :
+            // revêtement supérieur du plancher ET côtés (chants) du plancher —
+            // référencés par la rubrique « Planchers » (revetement_sup /
+            // revetement_chants). Visuel, nom, épaisseur (m), tarif au m²,
+            // favori Archicad, couleur par défaut.
+            return [
+                ['id' => 'parquet-contrecolle', 'nom' => 'Parquet contrecollé chêne', 'image' => '', 'epaisseur' => 0.014, 'rgb' => [196, 164, 124], 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'carrelage-gres', 'nom' => 'Carrelage grès cérame 60 × 60', 'image' => '', 'epaisseur' => 0.009, 'rgb' => [210, 208, 204], 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'beton-cire', 'nom' => 'Béton ciré', 'image' => '', 'epaisseur' => 0.003, 'rgb' => [178, 176, 172], 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'moquette', 'nom' => 'Moquette', 'image' => '', 'epaisseur' => 0.008, 'rgb' => [150, 150, 156], 'favori' => '', 'tarif' => 0, 'created' => $today],
+            ];
         case 'promotions':
             // Promotions (onglet « Promotions », zone Structure) : code, période
             // (dateDebut/dateFin, inclus), réduction en % et liste de modules
@@ -218,22 +259,19 @@ function archicad_catalogue_defaults(string $kind): array
         case 'murs':
             // favori = nom du favori Archicad à utiliser ('' = aucun, à
             // renseigner depuis le back-office) — repris dans l'export JSON.
-            // surface = id d'une surface (sous-catalogue "surfaces") dont le
-            // visuel est utilisé dans les élévations (revêtement EXTÉRIEUR
-            // par défaut du mur, appliqué côté client).
-            // interieur = id d'un revêtement "interieurs" (revêtement INTÉRIEUR
-            // par défaut du mur, appliqué côté client).
+            // Le revêtement par défaut du mur (extérieur / intérieur) n'est
+            // plus réglé ici : c'est l'étoile de la zone « Revêtements ».
             return [
-                ['id' => 'clt90', 'nom' => 'Mur CLT 90 mm', 'epaisseur' => 0.09, 'image' => '', 'surface' => 'bardage_bois', 'rgb' => [140, 107, 89], 'favori' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'clt140', 'nom' => 'Mur CLT 140 mm', 'epaisseur' => 0.14, 'image' => '', 'surface' => 'bardage_bois', 'rgb' => [140, 107, 89], 'favori' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'ossature160', 'nom' => 'Ossature bois 160 mm', 'epaisseur' => 0.16, 'image' => '', 'surface' => 'enduit', 'rgb' => [194, 169, 133], 'favori' => '', 'tarif' => 0, 'created' => $today],
-                ['id' => 'bloc200', 'nom' => 'Bloc béton 200 mm', 'epaisseur' => 0.20, 'image' => '', 'surface' => 'brique', 'rgb' => [158, 158, 158], 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'clt90', 'nom' => 'Mur CLT 90 mm', 'epaisseur' => 0.09, 'image' => '', 'rgb' => [140, 107, 89], 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'clt140', 'nom' => 'Mur CLT 140 mm', 'epaisseur' => 0.14, 'image' => '', 'rgb' => [140, 107, 89], 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'ossature160', 'nom' => 'Ossature bois 160 mm', 'epaisseur' => 0.16, 'image' => '', 'rgb' => [194, 169, 133], 'favori' => '', 'tarif' => 0, 'created' => $today],
+                ['id' => 'bloc200', 'nom' => 'Bloc béton 200 mm', 'epaisseur' => 0.20, 'image' => '', 'rgb' => [158, 158, 158], 'favori' => '', 'tarif' => 0, 'created' => $today],
             ];
         case 'planchers':
-            // épaisseur (m) du plancher, affichée en élévation et exportée ;
-            // revetement_sup = revêtement par défaut de la surface supérieure
-            // (catalogue "interieurs"), revetement_chants = revêtement par
-            // défaut des chants (catalogue "surfaces") — appliqués côté client
+            // épaisseur (m) du plancher, affichée en élévation et exportée.
+            // Les revêtements du plancher (face supérieure ET chants/bords) ne
+            // sont plus réglés ici : défaut = étoile de l'onglet « Plancher »
+            // (zone Revêtements), appliqué côté client aux deux
             return [
                 ['id' => 'clt_dalle', 'nom' => 'Dalle CLT + chape', 'epaisseur' => 0.30, 'image' => '', 'favori' => '', 'tarif' => 0, 'created' => $today],
                 ['id' => 'plancher_bois', 'nom' => 'Plancher bois sur lambourdes', 'epaisseur' => 0.24, 'image' => '', 'favori' => '', 'tarif' => 0, 'created' => $today],
@@ -273,15 +311,15 @@ function archicad_catalogue_defaults(string $kind): array
             ];
         case 'toitures':
             // Rubrique toiture : épaisseur (m) dessinée au-dessus de la ligne
-            // directrice en élévation, surface, couleur, favori — la géométrie
+            // directrice en élévation, couleur, favori — la géométrie
             // (monopente/deux pentes/terrasse) se règle dans la rubrique « Formes ».
-            // Revêtements par défaut appliqués côté client sur chaque pent :
-            // interieur (sous-face, catalogue "interieurs") et couverture
-            // (catalogue "couvertures")
+            // Les revêtements de chaque pent (sous-face / couverture) ne sont
+            // plus réglés ici : défauts = étoiles des onglets « Intérieur » et
+            // « Toiture » de la zone « Revêtements ».
             return [
-                ['id' => 'toit-monopente', 'nom' => 'Toiture monopente', 'epaisseur' => 0.30, 'image' => '', 'surface' => '', 'rgb' => [120, 113, 108], 'favori' => 'Baracca — Toiture monopente', 'tarif' => 0, 'created' => $today],
-                ['id' => 'toit-deuxpentes', 'nom' => 'Toiture deux pentes', 'epaisseur' => 0.30, 'image' => '', 'surface' => '', 'rgb' => [120, 113, 108], 'favori' => 'Baracca — Toiture deux pentes', 'tarif' => 0, 'created' => $today],
-                ['id' => 'toit-terrasse', 'nom' => 'Terrasse plate', 'epaisseur' => 0.25, 'image' => '', 'surface' => '', 'rgb' => [120, 113, 108], 'favori' => 'Baracca — Toiture terrasse', 'tarif' => 0, 'created' => $today],
+                ['id' => 'toit-monopente', 'nom' => 'Toiture monopente', 'epaisseur' => 0.30, 'image' => '', 'rgb' => [120, 113, 108], 'favori' => 'Baracca — Toiture monopente', 'tarif' => 0, 'created' => $today],
+                ['id' => 'toit-deuxpentes', 'nom' => 'Toiture deux pentes', 'epaisseur' => 0.30, 'image' => '', 'rgb' => [120, 113, 108], 'favori' => 'Baracca — Toiture deux pentes', 'tarif' => 0, 'created' => $today],
+                ['id' => 'toit-terrasse', 'nom' => 'Terrasse plate', 'epaisseur' => 0.25, 'image' => '', 'rgb' => [120, 113, 108], 'favori' => 'Baracca — Toiture terrasse', 'tarif' => 0, 'created' => $today],
             ];
     }
     return [];
@@ -322,11 +360,14 @@ function archicad_catalogue_forme_geometries(): array
     ];
 }
 
-// Rubriques dont un élément peut être marqué « par défaut » (appliqué à la
-// première ouverture du configurateur côté client)
+// Rubriques dont un élément peut être marqué « par défaut » (étoile dans la
+// zone action du back-office ; appliqué à la première ouverture du
+// configurateur côté client) : zones Structure (modules, isolation, formes,
+// autonomie, aménagements) et Revêtements (surfaces, interieurs, couvertures,
+// rev_plancher)
 function archicad_catalogue_defaultable_kinds(): array
 {
-    return ['modules', 'isolation', 'formes', 'charpentes', 'autonomie'];
+    return ['modules', 'isolation', 'formes', 'charpentes', 'autonomie', 'amenagements', 'surfaces', 'interieurs', 'couvertures', 'rev_plancher'];
 }
 
 /**
@@ -415,10 +456,10 @@ function archicad_load_catalogue(string $kind): array
             $items[$i]['image'] = '';
         }
     }
-    if (in_array($kind, ['surfaces', 'interieurs', 'couvertures'], true)) {
+    if (in_array($kind, ['surfaces', 'interieurs', 'couvertures', 'rev_plancher'], true)) {
         // Couleur par défaut du revêtement, affichée quand aucun visuel n'est
         // téléversé (comme le rgb des murs / toitures / charpentes)
-        $rgbDefaut = ['surfaces' => [158, 158, 158], 'interieurs' => [235, 230, 220], 'couvertures' => [120, 113, 108]][$kind];
+        $rgbDefaut = ['surfaces' => [158, 158, 158], 'interieurs' => [235, 230, 220], 'couvertures' => [120, 113, 108], 'rev_plancher' => [196, 164, 124]][$kind];
         foreach ($items as $i => $item) {
             if (empty($item['rgb']) || !is_array($item['rgb'])) {
                 $items[$i]['rgb'] = $rgbDefaut;
@@ -435,28 +476,22 @@ function archicad_load_catalogue(string $kind): array
         }
     }
     if ($kind === 'murs' || $kind === 'toitures') {
-        // Surface par défaut = première surface du catalogue surfaces.json
-        $firstSurface = (string) (archicad_load_catalogue('surfaces')[0]['id'] ?? '');
-        $firstInterieur = (string) (archicad_load_catalogue('interieurs')[0]['id'] ?? '');
+        // Migration : le revêtement par défaut n'est plus réglé sur l'élément
+        // (mur / complexe de toiture) mais choisi par l'étoile dans la zone
+        // « Revêtements » du back-office — on retire les anciens champs
+        // (surface / interieur / couverture)
+        $changedRev = false;
+        $oldKeys = $kind === 'murs' ? ['surface', 'interieur'] : ['surface', 'interieur', 'couverture'];
         foreach ($items as $i => $item) {
-            if (empty($item['surface'])) {
-                $items[$i]['surface'] = $firstSurface;
-            }
-            // Revêtement INTÉRIEUR par défaut (catalogue interieurs.json), appliqué
-            // côté client : face intérieure des murs, sous-face des pents de toiture
-            if (empty($item['interieur']) || archicad_catalogue_find('interieurs', (string) $item['interieur']) === null) {
-                $items[$i]['interieur'] = $firstInterieur;
-            }
-        }
-        if ($kind === 'toitures') {
-            // Couverture par défaut (catalogue couvertures.json), appliquée côté
-            // client sur chaque pent de toiture
-            $firstCouverture = (string) (archicad_load_catalogue('couvertures')[0]['id'] ?? '');
-            foreach ($items as $i => $item) {
-                if (empty($item['couverture']) || archicad_catalogue_find('couvertures', (string) $item['couverture']) === null) {
-                    $items[$i]['couverture'] = $firstCouverture;
+            foreach ($oldKeys as $k) {
+                if (array_key_exists($k, $items[$i])) {
+                    unset($items[$i][$k]);
+                    $changedRev = true;
                 }
             }
+        }
+        if ($changedRev) {
+            archicad_save_catalogue($kind, $items);
         }
     }
     if ($kind === 'murs') {
@@ -470,21 +505,24 @@ function archicad_load_catalogue(string $kind): array
         }
     }
     if ($kind === 'planchers') {
-        // Épaisseur en m (défaut 20 cm) ; revêtements par défaut appliqués côté
-        // client : surface supérieure (catalogue interieurs.json) et chants
-        // (catalogue surfaces.json)
-        $firstInterieur = (string) (archicad_load_catalogue('interieurs')[0]['id'] ?? '');
-        $firstSurface = (string) (archicad_load_catalogue('surfaces')[0]['id'] ?? '');
+        // Épaisseur en m (défaut 20 cm). Migration : les revêtements par défaut
+        // du plancher (revetement_sup / revetement_chants) quittent la rubrique —
+        // le défaut est l'étoile de l'onglet « Plancher » (zone Revêtements),
+        // appliqué côté client à la face supérieure ET aux chants (bords)
+        $changedPlanchers = false;
         foreach ($items as $i => $item) {
             if (empty($item['epaisseur'])) {
                 $items[$i]['epaisseur'] = 0.20;
             }
-            if (empty($item['revetement_sup']) || archicad_catalogue_find('interieurs', (string) $item['revetement_sup']) === null) {
-                $items[$i]['revetement_sup'] = $firstInterieur;
+            foreach (['revetement_sup', 'revetement_chants'] as $k) {
+                if (array_key_exists($k, $items[$i])) {
+                    unset($items[$i][$k]);
+                    $changedPlanchers = true;
+                }
             }
-            if (empty($item['revetement_chants']) || archicad_catalogue_find('surfaces', (string) $item['revetement_chants']) === null) {
-                $items[$i]['revetement_chants'] = $firstSurface;
-            }
+        }
+        if ($changedPlanchers) {
+            archicad_save_catalogue('planchers', $items);
         }
     }
     if ($kind === 'toitures') {
@@ -585,6 +623,24 @@ function archicad_load_catalogue(string $kind): array
             archicad_save_catalogue('autonomie', $items);
         }
     }
+    if ($kind === 'amenagements') {
+        // Liste de références valides vers le catalogue « Equipements » (même
+        // principe que « autonomie » vers « systèmes Aut. ») : les ids inconnus
+        // sont retirés, l'ordre et les doublons sont nettoyés
+        $changedAmenagements = false;
+        $eqIds = array_column(archicad_load_catalogue('equipements'), 'id');
+        foreach ($items as $i => $item) {
+            $refs = is_array($item['equipements'] ?? null) ? array_map('strval', $item['equipements']) : [];
+            $valid = array_values(array_unique(array_filter($refs, fn ($r) => in_array($r, $eqIds, true))));
+            if (($item['equipements'] ?? null) !== $valid) {
+                $items[$i]['equipements'] = $valid;
+                $changedAmenagements = true;
+            }
+        }
+        if ($changedAmenagements) {
+            archicad_save_catalogue('amenagements', $items);
+        }
+    }
     if ($kind === 'modules') {
         // Migration : un module ne garde que sa géométrie (nom, longueur,
         // largeur, hauteur, visuel) — forme / enveloppe / pente / pignon sont
@@ -682,7 +738,7 @@ function archicad_catalogue_delete(string $kind, string $id): bool
  */
 function archicad_marge_kinds(): array
 {
-    return ['charpentes', 'murs', 'planchers', 'toitures', 'menuiseries', 'fenetres_toit', 'systemes_aut', 'surfaces', 'interieurs', 'couvertures'];
+    return ['charpentes', 'murs', 'planchers', 'toitures', 'menuiseries', 'fenetres_toit', 'systemes_aut', 'equipements', 'surfaces', 'interieurs', 'couvertures', 'rev_plancher'];
 }
 
 function archicad_marges_file(): string
@@ -741,6 +797,9 @@ function archicad_catalogue_total_items(): int
         + count(archicad_load_catalogue('systemes_aut'))
         + count(archicad_load_catalogue('autonomie'))
         + count(archicad_load_catalogue('fenetres_toit'))
+        + count(archicad_load_catalogue('equipements'))
+        + count(archicad_load_catalogue('amenagements'))
+        + count(archicad_load_catalogue('rev_plancher'))
         + count(archicad_load_catalogue('toitures'));
 }
 

@@ -5,9 +5,14 @@
  * fenêtres, portes — avec visuel et référence Archicad), modèles de modules
  * (géométrie prédéfinie uniquement), isolations (type de mur + plancher +
  * toiture), formes de toiture (géométrie, pentes), charpentes, enveloppe
- * (murs, planchers, toitures) et revêtements en trois onglets : « Extérieur »
- * (surfaces — habillage des murs), « Intérieur » (murs + sous-face de toiture)
- * et « Toiture » (couvertures, par pent). Chaque élément porte un tarif ;
+ * (murs, planchers, toitures) et revêtements en quatre onglets : « Extérieur »
+ * (surfaces — habillage des murs), « Intérieur » (murs + sous-face de toiture),
+ * « Toiture » (couvertures, par pent) et « Plancher » (rev_plancher —
+ * revêtement supérieur du plancher et côtés/chants du plancher, référencés
+ * par la rubrique « Planchers »). Équipements (onglet « Equipements », zone
+ * Catalogue, comme les systèmes autonomes) regroupés en « packs » dans
+ * l'onglet « Aménagements » (zone Structure, sur le même principe que
+ * « systèmes Aut. » ↔ « Autonomie »). Chaque élément porte un tarif ;
  * le configurateur en calcule le tarif global du projet.
  *
  * L'ajout / la modification d'un élément se fait dans une boîte (modale) :
@@ -22,16 +27,16 @@ require_once __DIR__ . '/../includes/configurations.php';
 archicad_admin_require_auth();
 
 $section = (string) ($_GET['section'] ?? 'modules');
-// Onglets : Structure (Modules, Isolation, Formes, Autonomie), Catalogue (Charpentes,
-// Murs, Planchers, Complexe de toiture, Ouvrants, Fenêtres de toit, systèmes Aut.),
-// Revêtements (Extérieur = surfaces, Intérieur, Toiture = couvertures)
+// Onglets : Structure (Modules, Isolation, Formes, Autonomie, Aménagements), Catalogue (Charpentes,
+// Murs, Planchers, Complexe de toiture, Ouvrants, Fenêtres de toit, systèmes Aut., Equipements),
+// Revêtements (Extérieur = surfaces, Intérieur, Toiture = couvertures, Plancher = rev_plancher)
 // et Modèles (configurations « modèles » enregistrées par les administrateurs)
 // (l'ancien onglet « enveloppe » est éclaté en sous-onglets)
 if ($section === 'enveloppe') {
     $sous0 = (string) ($_GET['sous'] ?? '');
-    $section = in_array($sous0, ['murs', 'planchers', 'toitures', 'surfaces', 'interieurs', 'couvertures'], true) ? $sous0 : 'murs';
+    $section = in_array($sous0, ['murs', 'planchers', 'toitures', 'surfaces', 'interieurs', 'couvertures', 'rev_plancher'], true) ? $sous0 : 'murs';
 }
-if (!in_array($section, ['modules', 'isolation', 'formes', 'charpentes', 'autonomie', 'promotions', 'systemes_aut', 'fenetres_toit', 'murs', 'planchers', 'toitures', 'menuiseries', 'surfaces', 'interieurs', 'couvertures', 'modeles'], true)) {
+if (!in_array($section, ['modules', 'isolation', 'formes', 'charpentes', 'autonomie', 'amenagements', 'promotions', 'systemes_aut', 'equipements', 'fenetres_toit', 'murs', 'planchers', 'toitures', 'menuiseries', 'surfaces', 'interieurs', 'couvertures', 'rev_plancher', 'modeles'], true)) {
     $section = 'modules';
 }
 
@@ -46,10 +51,11 @@ function cat_redirect(string $section, string $flash, string $err = ''): void
 }
 
 // Rubriques gérées par save_enveloppe / delete_enveloppe : enveloppe
-// (murs, planchers, toitures) + revêtements (Extérieur, Intérieur, Toiture)
+// (murs, planchers, toitures) + revêtements (Extérieur, Intérieur, Toiture,
+// Plancher)
 function cat_enveloppe_kinds(): array
 {
-    return ['murs', 'planchers', 'surfaces', 'interieurs', 'couvertures', 'toitures'];
+    return ['murs', 'planchers', 'surfaces', 'interieurs', 'couvertures', 'rev_plancher', 'toitures'];
 }
 
 function cat_num(string $key): float
@@ -319,10 +325,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // ----- Modèles de modules (géométrie uniquement) -----
     if ($action === 'set_defaut') {
-        // Définit l'élément comme « par défaut » de sa rubrique (un seul à la fois)
+        // Définit l'élément comme « par défaut » de sa rubrique (un seul à la
+        // fois) : zones Structure (modules, isolation, formes, charpentes,
+        // autonomie, aménagements) et Revêtements (surfaces, interieurs,
+        // couvertures, rev_plancher)
         $sous = (string) ($_POST['sous'] ?? '');
         $id = trim((string) ($_POST['id'] ?? ''));
-        if (in_array($sous, ['modules', 'isolation', 'formes', 'charpentes', 'autonomie'], true) && $id !== '') {
+        if (in_array($sous, ['modules', 'isolation', 'formes', 'charpentes', 'autonomie', 'amenagements', 'surfaces', 'interieurs', 'couvertures', 'rev_plancher'], true) && $id !== '') {
             archicad_catalogue_set_default($sous, $id);
         }
         cat_redirect($section, 'saved');
@@ -493,6 +502,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         cat_redirect('systemes_aut', 'deleted');
     }
 
+    // ----- Équipements (onglet « Equipements », zone Catalogue) -----
+    // À l'identique des systèmes autonomes : visuel, nom, dimensions, favori
+    // Archicad, coût UNITAIRE. Regroupés en « packs » dans l'onglet
+    // « Aménagements » (zone Structure).
+    if ($action === 'save_equipement') {
+        $id = trim((string) ($_POST['id'] ?? ''));
+        $nom = trim((string) ($_POST['nom'] ?? ''));
+        // Saisie en cm (précision mm) — stockage en m
+        $largeur = round(cat_num('largeur') / 100, 3);
+        $hauteur = round(cat_num('hauteur') / 100, 3);
+        $tarif = round(cat_num('tarif'), 2);
+        if ($nom === '' || $largeur <= 0 || $hauteur <= 0) {
+            cat_redirect('equipements', 'invalid');
+        }
+        $item = archicad_catalogue_upsert('equipements', [
+            'nom' => $nom,
+            'largeur' => $largeur,
+            'hauteur' => $hauteur,
+            'favori' => trim((string) ($_POST['favori'] ?? '')),
+            'tarif' => $tarif, // coût unitaire
+        ], $id !== '' ? $id : null);
+        // Visuel (suppression demandée ou nouvel envoi)
+        if (isset($_POST['remove_image']) && (string) ($item['image'] ?? '') !== '') {
+            $fs = archicad_catalogue_image_fs_path((string) $item['image']);
+            if ($fs !== null && is_file($fs)) {
+                unlink($fs);
+            }
+            archicad_catalogue_upsert('equipements', ['image' => ''], (string) $item['id']);
+        }
+        if (isset($_FILES['image']) && is_array($_FILES['image'])) {
+            $stored = archicad_catalogue_store_image($_FILES['image'], (string) $item['id'], 'equipements');
+            if (!$stored['ok']) {
+                cat_redirect('equipements', 'image', (string) $stored['error']);
+            }
+            $old = (string) ($item['image'] ?? '');
+            if ($old !== '' && $old !== $stored['webPath']) {
+                $fs = archicad_catalogue_image_fs_path($old);
+                if ($fs !== null && is_file($fs)) {
+                    unlink($fs);
+                }
+            }
+            archicad_catalogue_upsert('equipements', ['image' => (string) $stored['webPath']], (string) $item['id']);
+        }
+        cat_redirect('equipements', 'saved');
+    }
+    if ($action === 'delete_equipement') {
+        archicad_catalogue_delete('equipements', trim((string) ($_POST['id'] ?? '')));
+        cat_redirect('equipements', 'deleted');
+    }
+
     // ----- Autonomie (pack = liste de systèmes autonomes, zone Structure) -----
     if ($action === 'save_autonomie') {
         $id = trim((string) ($_POST['id'] ?? ''));
@@ -537,6 +596,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'delete_autonomie') {
         archicad_catalogue_delete('autonomie', trim((string) ($_POST['id'] ?? '')));
         cat_redirect('autonomie', 'deleted');
+    }
+
+    // ----- Aménagements (pack = liste d'équipements, zone Structure) -----
+    // Sur le même principe que « autonomie » (pack de systèmes autonomes) :
+    // un aménagement est une liste d'équipements (références vers le
+    // catalogue « Equipements », zone Catalogue).
+    if ($action === 'save_amenagement') {
+        $id = trim((string) ($_POST['id'] ?? ''));
+        $nom = trim((string) ($_POST['nom'] ?? ''));
+        if ($nom === '') {
+            cat_redirect('amenagements', 'invalid');
+        }
+        $eqIds = array_column(archicad_load_catalogue('equipements'), 'id');
+        $posted = $_POST['equipements'] ?? [];
+        $posted = is_array($posted) ? $posted : [$posted];
+        // références valides uniquement, sans doublon, ordre conservé
+        $equipements = array_values(array_unique(array_filter(array_map('strval', $posted), fn ($r) => in_array($r, $eqIds, true))));
+        $item = archicad_catalogue_upsert('amenagements', [
+            'nom' => $nom,
+            'equipements' => $equipements,
+        ], $id !== '' ? $id : null);
+        // Visuel (suppression demandée ou nouvel envoi)
+        if (isset($_POST['remove_image']) && (string) ($item['image'] ?? '') !== '') {
+            $fs = archicad_catalogue_image_fs_path((string) $item['image']);
+            if ($fs !== null && is_file($fs)) {
+                unlink($fs);
+            }
+            archicad_catalogue_upsert('amenagements', ['image' => ''], (string) $item['id']);
+        }
+        if (isset($_FILES['image']) && is_array($_FILES['image'])) {
+            $stored = archicad_catalogue_store_image($_FILES['image'], (string) $item['id'], 'amenagements');
+            if (!$stored['ok']) {
+                cat_redirect('amenagements', 'image', (string) $stored['error']);
+            }
+            $old = (string) ($item['image'] ?? '');
+            if ($old !== '' && $old !== $stored['webPath']) {
+                $fs = archicad_catalogue_image_fs_path($old);
+                if ($fs !== null && is_file($fs)) {
+                    unlink($fs);
+                }
+            }
+            archicad_catalogue_upsert('amenagements', ['image' => (string) $stored['webPath']], (string) $item['id']);
+        }
+        cat_save_defaut('amenagements', $item);
+        cat_redirect('amenagements', 'saved');
+    }
+    if ($action === 'delete_amenagement') {
+        archicad_catalogue_delete('amenagements', trim((string) ($_POST['id'] ?? '')));
+        cat_redirect('amenagements', 'deleted');
     }
 
     // ----- Modèles (configurations « modèles » enregistrées par les admins) -----
@@ -715,20 +823,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cat_redirect($sous, 'invalid');
         }
         $fields = ['nom' => $nom, 'tarif' => $tarif];
-        // Référence de revêtement (catalogues surfaces / interieurs / couvertures) :
-        // id valide du catalogue, sinon son premier élément
-        $refOf = function (string $kind, string $posted): string {
-            $list = archicad_load_catalogue($kind);
-            $id = (string) $posted;
-            if ($id === '' || archicad_catalogue_find($kind, $id) === null) {
-                $id = (string) ($list[0]['id'] ?? '');
-            }
-            return $id;
-        };
+        // Les revêtements par défaut ne se règlent plus sur l'élément (mur,
+        // plancher, complexe de toiture) : c'est l'étoile de chaque onglet de
+        // la zone « Revêtements » qui s'applique côté client.
         if ($sous === 'murs' || $sous === 'toitures') {
             // référence Archicad ('' = aucun) — les surfaces n'en ont pas
             $fields['favori'] = trim((string) ($_POST['favori'] ?? ''));
-            $fields['surface'] = $refOf('surfaces', (string) ($_POST['surface'] ?? ''));
             // Saisie en cm (précision mm) — stockage en m
             $epaisseur = round(cat_num('epaisseur') / 100, 3);
             if ($epaisseur <= 0) {
@@ -740,23 +840,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 max(0, min(255, (int) round(cat_num('g')))),
                 max(0, min(255, (int) round(cat_num('b')))),
             ];
-            if ($sous === 'murs') {
-                // revêtement INTÉRIEUR par défaut du mur (catalogue interieurs.json)
-                $fields['interieur'] = $refOf('interieurs', (string) ($_POST['interieur'] ?? ''));
-            }
-            if ($sous === 'toitures') {
-                // revêtements par défaut du complexe de toiture, appliqués à chaque
-                // pent côté client : sous-face (interieurs.json) + couverture (couvertures.json)
-                $fields['interieur'] = $refOf('interieurs', (string) ($_POST['interieur'] ?? ''));
-                $fields['couverture'] = $refOf('couvertures', (string) ($_POST['couverture'] ?? ''));
-            }
         }
         if ($sous === 'planchers') {
             $fields['favori'] = trim((string) ($_POST['favori'] ?? ''));
-            // revêtements par défaut du plancher, appliqués côté client :
-            // surface supérieure (interieurs.json) et chants (surfaces.json)
-            $fields['revetement_sup'] = $refOf('interieurs', (string) ($_POST['revetement_sup'] ?? ''));
-            $fields['revetement_chants'] = $refOf('surfaces', (string) ($_POST['revetement_chants'] ?? ''));
             // Saisie en cm (précision mm) — stockage en m
             $epaisseur = round(cat_num('epaisseur') / 100, 3);
             if ($epaisseur <= 0) {
@@ -764,11 +850,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $fields['epaisseur'] = $epaisseur;
         }
-        if (in_array($sous, ['surfaces', 'interieurs', 'couvertures'], true)) {
-            // Revêtements (Extérieur / Intérieur / Toiture) : à l'identique du
-            // catalogue, chaque revêtement porte une référence Archicad, une
-            // épaisseur et une couleur par défaut (affichée sans visuel).
-            // Saisie en cm (précision mm) — stockage en m.
+        if (in_array($sous, ['surfaces', 'interieurs', 'couvertures', 'rev_plancher'], true)) {
+            // Revêtements (Extérieur / Intérieur / Toiture / Plancher) : à
+            // l'identique du catalogue, chaque revêtement porte une référence
+            // Archicad, une épaisseur et une couleur par défaut (affichée sans
+            // visuel). Saisie en cm (précision mm) — stockage en m.
             $fields['favori'] = trim((string) ($_POST['favori'] ?? ''));
             $epaisseur = round(cat_num('epaisseur') / 100, 3);
             if ($epaisseur <= 0) {
@@ -850,6 +936,8 @@ $formes = archicad_load_catalogue('formes');
 $charpentes = archicad_load_catalogue('charpentes');
 $systemesAut = archicad_load_catalogue('systemes_aut');
 $autonomies = archicad_load_catalogue('autonomie');
+$equipements = archicad_load_catalogue('equipements');
+$amenagements = archicad_load_catalogue('amenagements');
 $fenetresToit = archicad_load_catalogue('fenetres_toit');
 $promotions = archicad_load_catalogue('promotions');
 $murs = archicad_load_catalogue('murs');
@@ -857,6 +945,7 @@ $planchers = archicad_load_catalogue('planchers');
 $facades = archicad_load_catalogue('surfaces');       // revêtements Extérieur
 $interieurs = archicad_load_catalogue('interieurs');   // revêtements Intérieur
 $couvertures = archicad_load_catalogue('couvertures'); // revêtements Toiture (couvertures)
+$revPlancher = archicad_load_catalogue('rev_plancher'); // revêtements Plancher (supérieur + chants)
 $toitures = archicad_catalogue_toitures();
 $modeles = archicad_configurations_modeles();          // configurations « modèles » (admins)
 
@@ -869,6 +958,7 @@ $murNames = array_column($murs, 'nom', 'id');
 $plancherNames = array_column($planchers, 'nom', 'id');
 $facadeNames = array_column($facades, 'nom', 'id');
 $systemeAutNames = array_column($systemesAut, 'nom', 'id');
+$equipementNames = array_column($equipements, 'nom', 'id');
 $moduleNames = array_column($modules, 'nom', 'id');
 
 $new = isset($_GET['new']);
@@ -879,6 +969,8 @@ $editForme = null;
 $editCharpente = null;
 $editSystemeAut = null;
 $editAutonomie = null;
+$editEquipement = null;
+$editAmenagement = null;
 $editFenetreToit = null;
 $editPromotion = null;
 $editModele = null;
@@ -898,8 +990,12 @@ if (($editId = trim((string) ($_GET['edit'] ?? ''))) !== '') {
         $editCharpente = archicad_catalogue_find('charpentes', $editId);
     } elseif ($section === 'systemes_aut') {
         $editSystemeAut = archicad_catalogue_find('systemes_aut', $editId);
+    } elseif ($section === 'equipements') {
+        $editEquipement = archicad_catalogue_find('equipements', $editId);
     } elseif ($section === 'autonomie') {
         $editAutonomie = archicad_catalogue_find('autonomie', $editId);
+    } elseif ($section === 'amenagements') {
+        $editAmenagement = archicad_catalogue_find('amenagements', $editId);
     } elseif ($section === 'promotions') {
         $editPromotion = archicad_catalogue_find('promotions', $editId);
     } elseif ($section === 'modeles') {
@@ -926,9 +1022,10 @@ include __DIR__ . '/../includes/admin-head.php';
     <?php endif; ?>
 
 <?php
-// Trois cartes façon client : Structure (Modules, Isolation, Formes, Autonomie),
-// Catalogue (Charpentes, Murs, Planchers, Complexe de toiture, Ouvrants,
-// systèmes Aut.), Revêtements (Extérieur, Intérieur, Toiture).
+// Cartes façon client : Structure (Modules, Isolation, Formes, Autonomie,
+// Aménagements), Catalogue (Charpentes, Murs, Planchers, Complexe de toiture,
+// Ouvrants, Fenêtres de toit, systèmes Aut., Equipements),
+// Revêtements (Extérieur, Intérieur, Toiture, Plancher).
 // Chaque carte porte ses sous-onglets ; la rubrique active s'ouvre dans sa carte.
 $groupes = [
     'structure' => ['label' => 'Structure', 'sections' => [
@@ -936,6 +1033,7 @@ $groupes = [
         ['isolation', 'Isolation', count($isolations)],
         ['formes', 'Formes', count($formes)],
         ['autonomie', 'Autonomie', count($autonomies)],
+        ['amenagements', 'Aménagements', count($amenagements)],
     ]],
     'catalogue' => ['label' => 'Catalogue', 'sections' => [
         ['charpentes', 'Charpentes', count($charpentes)],
@@ -945,21 +1043,23 @@ $groupes = [
         ['menuiseries', 'Ouvrants', count($menuiseries)],
         ['fenetres_toit', 'Fenêtres de toit', count($fenetresToit)],
         ['systemes_aut', 'systèmes Aut.', count($systemesAut)],
+        ['equipements', 'Equipements', count($equipements)],
     ]],
     'surfaces' => ['label' => 'Revêtements', 'sections' => [
         ['surfaces', 'Extérieur', count($facades)],
         ['interieurs', 'Intérieur', count($interieurs)],
         ['couvertures', 'Toiture', count($couvertures)],
+        ['rev_plancher', 'Plancher', count($revPlancher)],
     ]],
     'modeles' => ['label' => 'Modèles', 'sections' => [
         ['modeles', 'Configurations modèles', count($modeles)],
     ]],
 ];
 $groupeOf = [
-    'modules' => 'structure', 'isolation' => 'structure', 'formes' => 'structure', 'autonomie' => 'structure', 'promotions' => 'structure',
+    'modules' => 'structure', 'isolation' => 'structure', 'formes' => 'structure', 'autonomie' => 'structure', 'amenagements' => 'structure', 'promotions' => 'structure',
     'charpentes' => 'catalogue', 'murs' => 'catalogue', 'planchers' => 'catalogue',
-    'toitures' => 'catalogue', 'menuiseries' => 'catalogue', 'fenetres_toit' => 'catalogue', 'systemes_aut' => 'catalogue',
-    'surfaces' => 'surfaces', 'interieurs' => 'surfaces', 'couvertures' => 'surfaces',
+    'toitures' => 'catalogue', 'menuiseries' => 'catalogue', 'fenetres_toit' => 'catalogue', 'systemes_aut' => 'catalogue', 'equipements' => 'catalogue',
+    'surfaces' => 'surfaces', 'interieurs' => 'surfaces', 'couvertures' => 'surfaces', 'rev_plancher' => 'surfaces',
     'modeles' => 'modeles',
 ];
 $groupeActif = $groupeOf[$section] ?? 'structure';
@@ -1272,6 +1372,98 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
         <div class="admin-actions">
           <button type="submit" class="btn btn-cta">Enregistrer</button>
           <a href="configurateur.php?section=systemes_aut" class="btn btn-secondary">Annuler</a>
+        </div>
+      </form>
+    </div>
+    <?php modal_close(); endif; ?>
+
+    <?php elseif ($section === 'equipements'): ?>
+    <div class="admin-card">
+      <h2>Equipements (<?= count($equipements) ?>) <?= cat_btn_add('configurateur.php?section=equipements&new=1', 'Ajouter un équipement') ?></h2>
+      <p class="admin-hint">Équipements (VMC, chauffe-eau, climatisation, stores…) : comme les systèmes autonomes (visuel, nom, dimensions, référence Archicad) avec un <strong>coût unitaire</strong>. Ils sont regroupés en « packs » dans l'onglet « Aménagements » (zone Structure) ; le client choisira un pack, et le visuel sera affiché dans le configurateur.</p>
+      <?php if ($equipements === []): ?>
+        <p class="admin-hint">Aucun équipement dans le catalogue pour le moment.</p>
+      <?php else: ?>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Visuel</th>
+              <th>Nom</th>
+              <th>Dimensions</th>
+              <th>Référence Archicad</th>
+              <th>Coût unitaire</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($equipements as $s): ?>
+              <tr>
+                <td><?= cat_thumb($s) ?></td>
+                <td><strong><?= htmlspecialchars((string) $s['nom']) ?></strong></td>
+                <td><?= cat_cm((float) ($s['largeur'] ?? 0)) ?> × <?= cat_cm((float) ($s['hauteur'] ?? 0)) ?></td>
+                <td><?= ($s['favori'] ?? '') !== '' ? htmlspecialchars((string) $s['favori']) : '—' ?></td>
+                <td><?= cat_eur((float) ($s['tarif'] ?? 0)) ?> €</td>
+                <td class="admin-actions">
+                  <?= cat_action_edit('configurateur.php?section=equipements&edit=' . urlencode((string) $s['id'])) ?>
+                  <?= cat_action_delete('configurateur.php?section=equipements', $csrf, 'delete_equipement', (string) $s['id'], 'Supprimer cet équipement du catalogue ?') ?>
+                </td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      <?php endif; ?>
+    </div>
+    <?php if ($editEquipement || $new): modal_open('configurateur.php?section=equipements'); ?>
+    <div class="admin-card">
+      <h2><?= $editEquipement ? 'Modifier : ' . htmlspecialchars((string) $editEquipement['nom']) : 'Ajouter un équipement' ?></h2>
+      <form method="post" action="configurateur.php?section=equipements" enctype="multipart/form-data">
+        <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
+        <input type="hidden" name="action" value="save_equipement">
+        <input type="hidden" name="id" value="<?= htmlspecialchars((string) ($editEquipement['id'] ?? '')) ?>">
+        <div class="modal-visual-row">
+          <?php if ($editEquipement && ($editEquipement['image'] ?? '') !== ''): ?>
+            <img src="../<?= ltrim(htmlspecialchars((string) $editEquipement['image']), '/') ?>" alt="" class="modal-visual-img">
+            <label class="admin-hint"><input type="checkbox" name="remove_image" value="1"> Supprimer le visuel</label>
+          <?php endif; ?>
+          <label for="eq-image">Visuel (image)</label>
+          <input type="file" id="eq-image" name="image" accept="image/*">
+          <span class="admin-hint">JPG, PNG, WebP ou GIF — 5 Mo max. Affiché dans le configurateur.</span>
+        </div>
+        <hr class="admin-sep">
+        <div class="modal-row">
+          <div class="admin-form-row">
+            <label for="eq-nom">Nom</label>
+            <input type="text" id="eq-nom" name="nom" required value="<?= htmlspecialchars((string) ($editEquipement['nom'] ?? '')) ?>" placeholder="VMC double flux">
+          </div>
+        </div>
+        <hr class="admin-sep">
+        <div class="modal-row">
+          <div class="admin-form-row">
+            <label for="eq-largeur">Largeur (cm)</label>
+            <input type="number" id="eq-largeur" name="largeur" step="0.1" min="10" required value="<?= htmlspecialchars($editEquipement ? cat_cm_input((float) $editEquipement['largeur']) : '100') ?>">
+          </div>
+          <div class="admin-form-row">
+            <label for="eq-hauteur">Hauteur (cm)</label>
+            <input type="number" id="eq-hauteur" name="hauteur" step="0.1" min="10" required value="<?= htmlspecialchars($editEquipement ? cat_cm_input((float) $editEquipement['hauteur']) : '100') ?>">
+          </div>
+        </div>
+        <hr class="admin-sep">
+        <div class="modal-row">
+          <div class="admin-form-row">
+            <label for="eq-tarif">Coût unitaire (€)</label>
+            <input type="number" id="eq-tarif" name="tarif" step="0.01" min="0" value="<?= htmlspecialchars((string) ($editEquipement['tarif'] ?? '0')) ?>">
+          </div>
+        </div>
+        <hr class="admin-sep">
+        <div class="modal-row">
+          <div class="admin-form-row">
+            <label for="eq-favori">Référence Archicad</label>
+            <input type="text" id="eq-favori" name="favori" value="<?= htmlspecialchars((string) ($editEquipement['favori'] ?? '')) ?>" placeholder="Nom de la référence Archicad, vide = aucune">
+          </div>
+        </div>
+        <div class="admin-actions">
+          <button type="submit" class="btn btn-cta">Enregistrer</button>
+          <a href="configurateur.php?section=equipements" class="btn btn-secondary">Annuler</a>
         </div>
       </form>
     </div>
@@ -1691,6 +1883,85 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
     </div>
     <?php modal_close(); endif; ?>
 
+    <?php elseif ($section === 'amenagements'): ?>
+    <div class="admin-card">
+      <h2>Aménagements (<?= count($amenagements) ?>) <?= cat_btn_add('configurateur.php?section=amenagements&new=1', 'Ajouter un pack aménagement') ?></h2>
+      <p class="admin-hint">Packs « Aménagements » (zone Structure) : chaque pack est une <strong>liste d'équipements</strong> (onglet « Equipements » de la zone Catalogue), sur le même principe que « Autonomie » / « systèmes Aut. ». Le coût du pack = somme des coûts unitaires de ses équipements. Le visuel est affiché dans le configurateur.</p>
+      <?php if ($amenagements === []): ?>
+        <p class="admin-hint">Aucun pack aménagement dans le catalogue pour le moment.</p>
+      <?php else: ?>
+        <table class="admin-table">
+          <thead>
+            <tr><th>Visuel</th><th>Nom</th><th>Équipements</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            <?php foreach ($amenagements as $a): ?>
+              <?php $eqNames = array_values(array_filter(array_map(fn ($eid) => $equipementNames[$eid] ?? null, is_array($a['equipements'] ?? null) ? $a['equipements'] : []))); ?>
+              <tr>
+                <td><?= cat_thumb($a) ?></td>
+                <td><strong><?= htmlspecialchars((string) $a['nom']) ?></strong></td>
+                <td><?= $eqNames ? htmlspecialchars(implode(', ', $eqNames)) : '—' ?></td>
+                <td class="admin-actions">
+                  <?= cat_action_defaut('configurateur.php?section=amenagements', $csrf, 'amenagements', (string) $a['id'], !empty($a['defaut'])) ?>
+                  <?= cat_action_edit('configurateur.php?section=amenagements&edit=' . urlencode((string) $a['id'])) ?>
+                  <?= cat_action_delete('configurateur.php?section=amenagements', $csrf, 'delete_amenagement', (string) $a['id'], 'Supprimer ce pack aménagement du catalogue ?') ?>
+                </td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      <?php endif; ?>
+    </div>
+    <?php if ($editAmenagement || $new): modal_open('configurateur.php?section=amenagements'); ?>
+    <div class="admin-card">
+      <h2><?= $editAmenagement ? 'Modifier : ' . htmlspecialchars((string) $editAmenagement['nom']) : 'Ajouter un pack aménagement' ?></h2>
+      <form method="post" action="configurateur.php?section=amenagements" enctype="multipart/form-data">
+        <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
+        <input type="hidden" name="action" value="save_amenagement">
+        <input type="hidden" name="id" value="<?= htmlspecialchars((string) ($editAmenagement['id'] ?? '')) ?>">
+        <div class="modal-visual-row">
+          <?php if ($editAmenagement && ($editAmenagement['image'] ?? '') !== ''): ?>
+            <img src="../<?= ltrim(htmlspecialchars((string) $editAmenagement['image']), '/') ?>" alt="" class="modal-visual-img">
+            <label class="admin-hint"><input type="checkbox" name="remove_image" value="1"> Supprimer le visuel</label>
+          <?php endif; ?>
+          <label for="am-image">Visuel (image)</label>
+          <input type="file" id="am-image" name="image" accept="image/*">
+          <span class="admin-hint">JPG, PNG, WebP ou GIF — 5 Mo max. Affiché dans le configurateur.</span>
+        </div>
+        <hr class="admin-sep">
+        <div class="modal-row">
+          <div class="admin-form-row">
+            <label for="am-nom">Nom</label>
+            <input type="text" id="am-nom" name="nom" required value="<?= htmlspecialchars((string) ($editAmenagement['nom'] ?? '')) ?>" placeholder="Aménagement standard">
+          </div>
+        </div>
+        <div class="modal-row">
+          <div class="admin-form-row admin-form-check">
+          </div>
+        </div>
+        <hr class="admin-sep">
+        <div class="admin-form-row">
+          <label>Équipements du pack (onglet « Equipements »)</label>
+          <?php if ($equipements === []): ?>
+            <p class="admin-hint">Aucun équipement dans le catalogue « Equipements » — créez-en d'abord dans la zone Catalogue.</p>
+          <?php else: ?>
+            <?php $selEq = is_array($editAmenagement['equipements'] ?? null) ? $editAmenagement['equipements'] : []; ?>
+            <?php foreach ($equipements as $s): ?>
+              <label class="admin-hint" style="display:flex; gap:6px; align-items:center;">
+                <input type="checkbox" name="equipements[]" value="<?= htmlspecialchars((string) $s['id']) ?>"<?= in_array((string) $s['id'], $selEq, true) ? ' checked' : '' ?>>
+                <?= htmlspecialchars((string) $s['nom']) ?> — <?= cat_cm((float) ($s['largeur'] ?? 0)) ?> × <?= cat_cm((float) ($s['hauteur'] ?? 0)) ?><?= +($s['tarif'] ?? 0) > 0 ? ' — ' . cat_eur((float) $s['tarif']) . ' €' : '' ?>
+              </label>
+            <?php endforeach; ?>
+          <?php endif; ?>
+        </div>
+        <div class="admin-actions">
+          <button type="submit" class="btn btn-cta">Enregistrer</button>
+          <a href="configurateur.php?section=amenagements" class="btn btn-secondary">Annuler</a>
+        </div>
+      </form>
+    </div>
+    <?php modal_close(); endif; ?>
+
     <?php elseif ($section === 'promotions'): ?>
     <?php $today = date('Y-m-d'); ?>
     <div class="admin-card">
@@ -1985,12 +2256,16 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
     </div>
     <?php modal_close(); endif; ?>
 
-    <?php elseif (in_array($section, ['surfaces', 'interieurs', 'couvertures'], true)): ?>
+    <?php elseif (in_array($section, ['surfaces', 'interieurs', 'couvertures', 'rev_plancher'], true)): ?>
     <?php
-      // Carte « Revêtements » : trois onglets — Extérieur (surfaces, habillage
-      // des murs), Intérieur (murs + sous-face de toiture) et Toiture
-      // (couvertures, par pent). Mêmes champs que le catalogue : visuel, nom,
-      // épaisseur, tarif au m², référence Archicad.
+      // Carte « Revêtements » : quatre onglets — Extérieur (surfaces, habillage
+      // des murs), Intérieur (murs + sous-face de toiture), Toiture
+      // (couvertures, par pent) et Plancher (rev_plancher : revêtement
+      // supérieur du plancher et côtés/chants du plancher, référencés par la
+      // rubrique « Planchers »). Mêmes champs que le catalogue : visuel, nom,
+      // épaisseur, tarif au m², référence Archicad. Comme dans les zones
+      // Structure et Catalogue, un élément par onglet peut être marqué « par
+      // défaut » (étoile dans la zone action) : repris par le configurateur.
       $revOnglets = [
         'surfaces' => [
           'label' => 'Extérieur', 'items' => $facades,
@@ -2012,6 +2287,13 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
           'add' => 'Ajouter une couverture de toiture', 'placeholder' => 'Bardeaux bois',
           'empty' => 'Aucune couverture de toiture dans le catalogue pour le moment.',
           'del' => 'Supprimer cette couverture du catalogue ?',
+        ],
+        'rev_plancher' => [
+          'label' => 'Plancher', 'items' => $revPlancher,
+          'hint' => "Revêtements du plancher : surface supérieure du plancher et côtés (chants) du plancher, référencés par la rubrique « Planchers » (champs « revêtement supérieur » et « revêtement des chants ») et appliqués côté client.",
+          'add' => 'Ajouter un revêtement de plancher', 'placeholder' => 'Parquet contrecollé chêne',
+          'empty' => 'Aucun revêtement de plancher dans le catalogue pour le moment.',
+          'del' => 'Supprimer ce revêtement de plancher du catalogue ?',
         ],
       ];
       $rev = $revOnglets[$section];
@@ -2042,6 +2324,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
                 <td><span class="admin-color-swatch" style="background-color: <?= cat_hex($rgbF) ?>;"></span> <?= cat_hex($rgbF) ?></td>
                 <td><?= ($f['favori'] ?? '') !== '' ? htmlspecialchars((string) $f['favori']) : '—' ?></td>
                 <td class="admin-actions">
+                  <?= cat_action_defaut('configurateur.php?section=' . $section, $csrf, $section, (string) $f['id'], !empty($f['defaut'])) ?>
                   <?= cat_action_edit('configurateur.php?section=' . $section . '&edit=' . urlencode((string) $f['id'])) ?>
                   <?= cat_action_delete('configurateur.php?section=' . $section, $csrf, 'delete_enveloppe', (string) $f['id'], $rev['del'], '<input type="hidden" name="sous" value="' . $section . '">') ?>
                 </td>
@@ -2092,7 +2375,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
         <hr class="admin-sep">
         <div class="modal-row">
           <div class="admin-form-row">
-            <?php $rgbRevDefaut = ['surfaces' => [158, 158, 158], 'interieurs' => [235, 230, 220], 'couvertures' => [120, 113, 108]][$section] ?? [158, 158, 158]; ?>
+            <?php $rgbRevDefaut = ['surfaces' => [158, 158, 158], 'interieurs' => [235, 230, 220], 'couvertures' => [120, 113, 108], 'rev_plancher' => [196, 164, 124]][$section] ?? [158, 158, 158]; ?>
             <?php $rgbRev = $editEnv['item']['rgb'] ?? $rgbRevDefaut; ?>
             <label>Couleur par défaut (affichée si aucun visuel, en hex <?= cat_hex($rgbRev) ?>)</label>
             <div class="admin-color-inputs">
@@ -2122,7 +2405,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
     <div class="admin-card">
       <?php if ($section === 'murs'): ?>
       <h2>Murs porteurs (<?= count($murs) ?>) <?= cat_btn_add('configurateur.php?section=murs&new=1', 'Ajouter un type de mur') ?></h2>
-      <p class="admin-hint">Types de mur porteur : épaisseur, couleur, revêtements par défaut (extérieur « Extérieur » / intérieur « Intérieur », appliqués côté client), référence Archicad, coût au m² — liés aux modules.</p>
+      <p class="admin-hint">Types de mur porteur : épaisseur, couleur, référence Archicad, coût au m² — liés aux modules. Les revêtements du mur se choisissent par défaut dans la zone « Revêtements » (étoile des onglets « Extérieur » / « Intérieur »).</p>
       <?php if ($murs === []): ?>
         <p class="admin-hint">Aucun type de mur dans le catalogue pour le moment.</p>
       <?php else: ?>
@@ -2149,7 +2432,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
       <?php endif; ?>
       <?php elseif ($section === 'planchers'): ?>
       <h2>Planchers (<?= count($planchers) ?>) <?= cat_btn_add('configurateur.php?section=planchers&new=1', 'Ajouter un plancher') ?></h2>
-      <p class="admin-hint">Types de plancher : épaisseur (dessinée en élévation, +21,7 cm au-delà de la ligne directrice des murs), revêtements par défaut (supérieur « Intérieur » / chants « Extérieur », appliqués côté client), référence Archicad, coût au m² — liés aux modules.</p>
+      <p class="admin-hint">Types de plancher : épaisseur (dessinée en élévation, +21,7 cm au-delà de la ligne directrice des murs), référence Archicad, coût au m² — liés aux modules. Les revêtements du plancher (face supérieure et chants/bords) se choisissent par défaut dans l'onglet « Plancher » de la zone « Revêtements » (étoile).</p>
       <?php if ($planchers === []): ?>
         <p class="admin-hint">Aucun plancher dans le catalogue pour le moment.</p>
       <?php else: ?>
@@ -2175,7 +2458,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
       <?php endif; ?>
       <?php else: ?>
       <h2>Complexe de toiture (<?= count($toitures) ?>) <?= cat_btn_add('configurateur.php?section=toitures&new=1', 'Ajouter un type de toiture') ?></h2>
-      <p class="admin-hint">Types de toiture : épaisseur (bande au-dessus de la ligne directrice en élévation), couleur, revêtements par défaut (sous-face « Intérieur » / couverture « Toiture », appliqués à chaque pent côté client), référence Archicad, coût au m². La géométrie (monopente / deux pentes / quatre pentes) se règle dans l'onglet « Formes ».</p>
+      <p class="admin-hint">Types de toiture : épaisseur (bande au-dessus de la ligne directrice en élévation), couleur, référence Archicad, coût au m². La géométrie (monopente / deux pentes / quatre pentes) se règle dans l'onglet « Formes » ; les revêtements de chaque pent (sous-face / couverture) se choisissent par défaut dans les onglets « Intérieur » / « Toiture » de la zone « Revêtements » (étoile).</p>
       <?php if ($toitures === []): ?>
         <p class="admin-hint">Aucun type de toiture dans le catalogue pour le moment.</p>
       <?php else: ?>
@@ -2254,17 +2537,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
           </div>
         </div>
         <hr class="admin-sep">
-        <div class="modal-row">
-          <div class="admin-form-row">
-            <label for="mur-surface">Revêtement extérieur par défaut (catalogue « Extérieur »)</label>
-            <select id="mur-surface" name="surface"><?= cat_select_options($facades, (string) ($editEnv['item']['surface'] ?? ($facades[0]['id'] ?? ''))) ?></select>
-          </div>
-          <div class="admin-form-row">
-            <label for="mur-interieur">Revêtement intérieur par défaut (catalogue « Intérieur »)</label>
-            <select id="mur-interieur" name="interieur"><?= cat_select_options($interieurs, (string) ($editEnv['item']['interieur'] ?? ($interieurs[0]['id'] ?? ''))) ?></select>
-          </div>
-        </div>
-        <p class="admin-hint">Ces revêtements sont présélectionnés par défaut dans le configurateur client (le client peut les changer mur par mur).</p>
+        <p class="admin-hint">Les revêtements du mur (extérieur / intérieur) ne se règlent plus ici : le configurateur client applique par défaut l'élément marqué « par défaut » (étoile) de chaque onglet de la zone « Revêtements » (le client peut ensuite changer mur par mur).</p>
         <hr class="admin-sep">
         <div class="modal-row">
           <div class="admin-form-row">
@@ -2319,17 +2592,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
           </div>
         </div>
         <hr class="admin-sep">
-        <div class="modal-row">
-          <div class="admin-form-row">
-            <label for="pl-rev-sup">Revêtement supérieur par défaut (catalogue « Intérieur »)</label>
-            <select id="pl-rev-sup" name="revetement_sup"><?= cat_select_options($interieurs, (string) ($editEnv['item']['revetement_sup'] ?? ($interieurs[0]['id'] ?? ''))) ?></select>
-          </div>
-          <div class="admin-form-row">
-            <label for="pl-rev-chants">Revêtement des chants par défaut (catalogue « Extérieur »)</label>
-            <select id="pl-rev-chants" name="revetement_chants"><?= cat_select_options($facades, (string) ($editEnv['item']['revetement_chants'] ?? ($facades[0]['id'] ?? ''))) ?></select>
-          </div>
-        </div>
-        <p class="admin-hint">Ces revêtements sont présélectionnés par défaut dans le configurateur client.</p>
+        <p class="admin-hint">Les revêtements du plancher (face supérieure ET chants/bords) ne se règlent plus ici : le configurateur client applique par défaut l'élément marqué « par défaut » (étoile) de l'onglet « Plancher » de la zone « Revêtements », pour les deux.</p>
         <hr class="admin-sep">
         <div class="modal-row">
           <div class="admin-form-row">
@@ -2396,17 +2659,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
           </div>
         </div>
         <hr class="admin-sep">
-        <div class="modal-row">
-          <div class="admin-form-row">
-            <label for="to-interieur">Revêtement intérieur par défaut — sous-face (catalogue « Intérieur »)</label>
-            <select id="to-interieur" name="interieur"><?= cat_select_options($interieurs, (string) ($editEnv['item']['interieur'] ?? ($interieurs[0]['id'] ?? ''))) ?></select>
-          </div>
-          <div class="admin-form-row">
-            <label for="to-couverture">Couverture de toiture par défaut (catalogue « Toiture »)</label>
-            <select id="to-couverture" name="couverture"><?= cat_select_options($couvertures, (string) ($editEnv['item']['couverture'] ?? ($couvertures[0]['id'] ?? ''))) ?></select>
-          </div>
-        </div>
-        <p class="admin-hint">Ces revêtements sont appliqués par défaut à chaque pent de toiture dans le configurateur client.</p>
+        <p class="admin-hint">Les revêtements de chaque pent (sous-face « Intérieur » / couverture « Toiture ») ne se règlent plus ici : le configurateur client applique par défaut les éléments marqués « par défaut » (étoile) des onglets « Intérieur » et « Toiture » de la zone « Revêtements ».</p>
         <hr class="admin-sep">
         <div class="modal-row">
           <div class="admin-form-row">

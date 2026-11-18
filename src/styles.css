@@ -197,6 +197,7 @@ hr.sep { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
 .chiffrage-line { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); }
 .chiffrage-line:first-child { border-top: none; padding-top: 0; }
 .chiffrage-left { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.chiffrage-line .carac-arrow { align-self: center; margin-left: -2px; }
 .chiffrage-right { display: flex; align-items: baseline; gap: 10px; }
 .chiffrage-k { color: #44403c; font-weight: 600; font-size: 0.95rem; }
 .chiffrage-surf { color: #a8a29e; font-size: 0.85rem; }
