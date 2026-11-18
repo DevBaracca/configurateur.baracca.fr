@@ -1,7 +1,118 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# BARACCA-IMPORT v2.28 — vérifiez la présence de cette ligne : elle prouve
+# BARACCA-IMPORT v2.59 — vérifiez la présence de cette ligne : elle prouve
 # que vous exécutez bien la dernière version du script.
+# v2.59 : avec allège, favori (ouvrant ET BAIELIBRE) envoyé À LA CRÉATION avec
+#   sillHeight (champs explicites > favori) et PLUS réappliqué après coup.
+#   Probes 5d/5e : favori+sillHeight à la création, favori sans keepFields.
+# v2.58 : la liste des 177 composites n'est plus dumpée dans la console (count only).
+# v2.57 : log « allège ... envoyée (sillHeight) » par ouverture concernée.
+#   Probe v2.56 : sillHeight EFFECTIF (relecture 0.9) et CONSERVÉ après favori
+#   + keepFields -> si l'allège reste à 0, le JSON exporté ne contenait pas
+#   « allege » (bundle client pas déployé) ou script < v2.54.
+# v2.56 : probe 5c — sillHeight effectif ? (relecture details complète) et favori
+#   réappliqué avec keepFields conserve-t-il l'allège ?
+# v2.55 : « positionHauteur » des fenêtres de toit (distance au bas de pente le
+#   long du rampant, exportée par le configurateur) -> ancre décalée en plan de
+#   ph*cos(pente) vers le faîtage ; les trous suivent via l'anchorLevel relu.
+# v2.54 : CHAMP_ALLEGE = "sillHeight" (probe v2.53 : anchorLevel/anchorPosition
+#   refusés, sillHeight accepté). Ouvertures AVEC allège : favori appliqué APRÈS
+#   création via ApplyFavoritesToElements + keepFields (width/height/centerOffset/
+#   sillHeight/refSide) pour ne pas réinitialiser l'allège ; idem baies libres.
+# v2.53 : champ « allège » (hauteur d'implantation) des ouvertures exporté par
+#   le configurateur et envoyé à CreateWindows/CreateDoors (CHAMP_ALLEGE,
+#   repli gracieux sur l'appui du favori si refusé) + mêmes champs aux baies
+#   libres des revêtements ; probe 5b pour trouver le champ accepté/effectif.
+# v2.52 : dy = sin(p)cos(p)(al_fen - al_trou) SANS dénominateur. Le résidu v2.51
+#   (+0,8 / -2,72 cm = 0,2 x B) prouve pos_Y(trou) = anchor_y + B avec
+#   B = sin(p)cos(p)(al_trou@fen - al_fen) : pente 1, pas de facteur 1+sin^2.
+#   Ex. pente 30 : dy couv -4,0 cm (y=5,0351), dy inf +13,6 cm (y=5,2111).
+# v2.51 : dy = sin(p)cos(p)(al_fen - al_trou)/(1+s*sin^2) -> facteur 1+sin^2 en trop.
+# v2.50 : alignait les anchorLevel -> faux, car déplacer y déplace le trou en plan.
+# v2.49 : trous au même (x, y) que la fenêtre (alignement en plan, plus de
+# décalage le long de la pente), sans favori LUCARNEVIDE (fixMode=Horizontal).
+# v2.48 : trous créés SANS favori LUCARNEVIDE (qui force fixMode=Horizontal et
+# décale les trous) + ancre décalée le long de la pente ; favori non réappliqué
+# ensuite pour préserver la géométrie.
+# v2.47 : trous de lucarnes alignés EN PLAN : anchorLevel non réglable sur
+# Tapir 2.0.0 (CreateSkylights refuse le champ, SetDetailsOfElements refuse tous
+# les payloads) -> on décale l'ancre du trou le long de la pente de
+# dy = (E - niveau_couche)/tan(pente), avec E = niveau_complexe + anchorLevel_fenêtre.
+# v2.46 : anchorLevel de la FENÊTRE fixé à 0,60 m par défaut (SetDetailsOfElements,
+# sinon valeur lue du favori) ; les trous en découlent.
+# v2.45 : tout se règle par anchorLevel (ancre x,y = celle de la fenêtre) :
+# rotation de la pente Y' = X·sinθ + e·cosθ, X commun ->
+# anchorLevel_couche = anchorLevel_fenêtre + (e_couche - e_complexe)·cos(pente).
+# v2.44 : ligne de référence (anchorLevel) des trous réglée par SetDetailsOfElements
+# (plusieurs formes de payload testées + vérif par relecture) :
+# anchorLevel_cible = anchorLevel_fenêtre - delta_couche. Repli : delete+recréation
+# avec z corrigé.
+# v2.43 : réapplication des favoris de skylights en fin d'import AVEC
+# keepFields = width, height, anchorLevel, anchorPosition — sinon le favori
+# remet sa propre ligne de référence et les fenêtres de toit se décalent à la
+# toute fin du script (constaté : placement OK pendant l'import, saut à la fin).
+# v2.42 : diag compact — une ligne par skylight lu (id, owner, anchor x/y,
+# anchorLevel, fixMode) + niveaux des toitures, pour lire la position réelle
+# des trous après correction.
+# v2.41 : la ligne de référence (anchorLevel) des TROUS est modifiée APRÈS
+# création via SetDetailsOfElements (CreateSkylights la refuse à la création) :
+# anchorLevel_cible = anchorLevel_fenêtre - delta_couche. Repli : delete+recréation
+# avec z corrigé (v2.40).
+# v2.40 : CreateSkylights refuse anchorLevel (additionalProperties) MAIS le z de
+# anchorPosition alimente anchorLevel (anchorLevel = favori + z - niveau toiture).
+# Trous en deux passes : passe 1 z = H+delta -> lecture anchorLevel réel ->
+# suppression (DeleteElements) -> passe 2 avec z_final = H + anchorLevel_fenêtre
+# - anchorLevel_trou = même cote absolue que la fenêtre.
+# v2.39 : skylights en DEUX PHASES — l'ancre est 2D (x,y), la hauteur passe par
+# anchorLevel (fixMode "Vertical", relatif au niveau de la toiture propriétaire ;
+# le z d'anchorPosition est ignoré). Phase 1 : fenêtres seules + lecture réelle de
+# leur anchorLevel (GetDetailsOfElements). Phase 2 : trous au même (x,y) que la
+# fenêtre, anchorLevel = anchorLevel_fenêtre - delta_niveau_couche.
+# v2.38 : DIAGNOSTIC — GetDetailsOfElements appelé avec {"elements":
+# [{"elementId": ...}]} (sinon « elementId is missing ») : affiche ancre envoyée
+# + position réelle lue pour chaque skylight (calibration ancre Tapir ->
+# placement Archicad ; la ligne de référence affichée vient du favori, pas de
+# l'ancre).
+# v2.37 : DIAGNOSTIC — après CreateSkylights, relit GetDetailsOfElements des
+# skylights créés et affiche ancre envoyée + position lue (calibration ancre
+# Tapir -> placement réel, la ligne de référence venant du favori).
+# v2.36 : trous de lucarnes alignés en 3D avec la fenêtre par décalage EN PLAN
+# le long de la pente : dy = (lvl_cplx - lvl_role)/tan(pente) (vers le faîtage
+# si la couche est au-dessus du complexe), z = niveau de la couche — la ligne
+# de référence affichée venant du favori, le z envoyé est sans effet.
+# v2.35 : trous de lucarnes : X (position le long de la pente) COMMUN avec la
+# fenêtre -> même (x, y) ; seule la ligne de référence z varie selon l'épaisseur
+# de la couche : dz_couv = -(ep_cplx+ep_couv)·cos(pente), dz_inf = -(ep_cplx-ep_inf)·cos(pente).
+# v2.34 : trous de lucarnes calés LE LONG DE LA PENTE (dy = ±(ep_cplx+ep_rev)·
+# sin(pente)·cos(pente), dz = ±(ep_cplx+ep_rev)·sin²(pente) ; sous-face vers le
+# faîtage, couverture vers la rive ; x = axe de la fenêtre) ; anti-doublon des
+# skylights renforcé : favoris skylights validés item par item contre le gabarit
+# (GetFavoritesByType Skylight) et repli sans favori ITEM PAR ITEM (plus de
+# recréation du lot entier -> plus de fenêtre de toit en double).
+# v2.33 : jonctions -> les couvertures se rejoignent à l'AXE (milieu de l'écart,
+# des deux côtés est/ouest comme nord/sud), comme les murs ; trous de lucarnes
+# (couverture / sous-face) au même x,y que la fenêtre mais z calé sur le PLAN DU
+# TOIT de la couche propriétaire ; anti-doublon final des skylights envoyés
+# (aucun doublon même si l'export répète un pent/une fenêtre).
+# v2.32 : extrémités des murs (mur + revêtements int./ext.) placées à l'AXE du
+# mur commun aux jonctions avec un voisin (mur/mur ou charpente, ex. modules qui
+# se prolongent par les pignons est/ouest) — même système que les toitures ;
+# anti-doublon des fenêtres de toit au niveau du pent.
+# v2.31 : baies libres des lucarnes calées sur l'ANCRE EXACTE de la fenêtre dans
+# le complexe (même x, y, z) — plus de décalage de hauteur ; extrémités des murs
+# rognées au centre du mur commun (jonction mur/mur) pour que seule la toiture du
+# module découpe le mur (retour à un opérateur SEO par module, plus de toitures
+# voisines).
+# v2.30 : fenêtres de toit alignées PAR LE BAS (ancre = bas de la fenêtre sur la
+# rive, z sur le plan de chaque couche, dérivé de l'ancre du complexe), anti-
+# doublon ; poutre de charpente rallongée jusqu'aux extrémités des poteaux ;
+# revêtements intérieurs (murs) et sous-face de toiture rejoignent l'axe des
+# jonctions charpente (milieu de l'écart).
+# v2.29 : baies libres des fenêtres de toit calées sur l'ancre de la fenêtre du
+# complexe (même axe de fenêtre, z dérivé du plan de chaque couche de toiture) ;
+# dimensions width/height conservées lors du repli de favori (le trou
+# BARACCA-LUCARNEVIDE prend la taille réelle de la fenêtre) ; découpage SEO des
+# murs prenant aussi les toitures des modules voisins (parties communes).
 # v2.28 : jonction des toitures entre modules accolés détectée par l'ÉCART entre
 # lignes directrices (comme la 3D), est/ouest = amont recouvre l'écart / aval à
 # 0, nord/sud = moitié chacun ; baies libres dans les revêtements mesurées depuis
@@ -197,6 +308,15 @@ FAVORIS_TOITURE = {}      # repli si l'export n'a pas de champ « favori »
 FAVORI_BAIE_LIBRE = "BARACCA-BAIELIBRE"
 FAVORI_LUCARNE_VIDE = "BARACCA-LUCARNEVIDE"
 FAVORIS_CHARPENTE = {}    # idem pour poteaux/poutres
+# v2.53 : champ de hauteur d'implantation (allège) envoyé à CreateWindows /
+# CreateDoors. Probe v2.53 : anchorLevel et anchorPosition REFUSÉS (4002),
+# sillHeight ACCEPTÉ -> v2.54 : CHAMP_ALLEGE = "sillHeight".
+# Si le champ est refusé (additionalProperties), tapir_cree le retire et
+# retombe sur l'appui du favori. Mettre '' pour ne rien envoyer.
+CHAMP_ALLEGE = "sillHeight"
+# Champs protégés par keepFields quand un favori est (ré)appliqué sur une
+# ouverture avec allège (sinon le favori réinitialise la hauteur d'implantation).
+KEEP_FIELDS_OUVERTURE = ("width", "height", "centerOffset", "sillHeight", "refSide")
 
 
 def favori_de(obj, repli_dict, cle):
@@ -296,7 +416,8 @@ class ArchicadBridge:
         Toute autre erreur est relancée."""
         repli = ("favoriteName", "referenceLineLocation",
                  "compositeId", "structureType", "buildingMaterialId",
-                 "refSide", "oSide", "reflected")
+                 "refSide", "oSide", "reflected",
+                 "anchorLevel", "sillHeight")   # v2.53 : allège (si refusé -> appui du favori)
         while True:
             key = next((k for k, v in parameters.items()
                         if isinstance(v, list)), None)
@@ -462,6 +583,96 @@ def probe():
             ok.append(True)
         except Exception:
             ok.append(False)
+
+        # 5b. v2.53 : quel champ de hauteur d'implantation (allège) CreateWindows
+        # accepte-t-il, et est-il effectif ? (relecture GetDetailsOfElements)
+        for fld, val in (("anchorLevel", 0.9), ("sillHeight", 0.9),
+                         ("anchorPosition", {"x": 0.0, "y": 0.0, "z": 0.9})):
+            try:
+                r = bridge.tapir("CreateWindows", {"windowsData": [{
+                    "ownerWallId": wall_id,
+                    "centerOffset": 1.6,
+                    "width": 0.8,
+                    "height": 1.2,
+                    fld: val,
+                }]})
+                eid = (r.get("elements") or [{}])[0].get("elementId")
+                det = {}
+                if eid is not None:
+                    try:
+                        d = bridge.tapir("GetDetailsOfElements",
+                                         {"elements": [{"elementId": eid}]})
+                        det = (d.get("detailsOfElements") or [{}])[0].get("details") or {}
+                    except Exception:
+                        pass
+                sill = {k: v for k, v in det.items()
+                        if any(t in str(k).lower() for t in ("sill", "height", "level", "anchor"))}
+                print(f"CreateWindows+{fld:<15} ACCEPTE, hauteur lue={json.dumps(sill, default=str)[:200]}")
+            except Exception as exc:
+                print(f"CreateWindows+{fld:<15} REFUSE : {str(exc)[:130]}")
+
+        # 5c. v2.56 : sillHeight est-il EFFECTIF ? relecture complète des details,
+        # puis réapplication d'un favori avec keepFields (l'allège est-il conservé ?)
+        try:
+            r = bridge.tapir("CreateWindows", {"windowsData": [{
+                "ownerWallId": wall_id, "centerOffset": 2.6, "width": 0.8,
+                "height": 1.2, "sillHeight": 0.9,
+            }]})
+            eid = (r.get("elements") or [{}])[0].get("elementId")
+            d = bridge.tapir("GetDetailsOfElements", {"elements": [{"elementId": eid}]})
+            det = (d.get("detailsOfElements") or [{}])[0].get("details") or {}
+            print(f"  sillHeight=0.9 creation -> details : {json.dumps(det, default=str)[:500]}")
+            favs = bridge.tapir("GetFavoritesByType", {"elementType": "Window"}).get("favorites", [])
+            if favs and eid is not None:
+                fn = favs[0].get("name") if isinstance(favs[0], dict) else favs[0]
+                bridge.tapir("ApplyFavoritesToElements", {
+                    "favoritesToApply": [{"elementId": eid, "favorite": fn}],
+                    "applySettings": True, "applyClassifications": True,
+                    "applyCategories": True, "applyProperties": False,
+                    "keepFields": ["width", "height", "centerOffset", "sillHeight", "refSide"]})
+                d2 = bridge.tapir("GetDetailsOfElements", {"elements": [{"elementId": eid}]})
+                det2 = (d2.get("detailsOfElements") or [{}])[0].get("details") or {}
+                print(f"  après favori « {fn} » + keepFields -> details : {json.dumps(det2, default=str)[:500]}")
+        except Exception as exc:
+            print(f"  test sillHeight échoué : {str(exc)[:150]}")
+
+        # 5d. v2.59 : favoriteName + sillHeight ENSEMBLE à la création :
+        # le favori s'applique-t-il (libPart) et sillHeight est-il conservé ?
+        try:
+            favs = bridge.tapir("GetFavoritesByType", {"elementType": "Window"}).get("favorites", [])
+            if favs:
+                fn = favs[0].get("name") if isinstance(favs[0], dict) else favs[0]
+                r = bridge.tapir("CreateWindows", {"windowsData": [{
+                    "ownerWallId": wall_id, "centerOffset": 0.4, "width": 0.9,
+                    "height": 1.2, "sillHeight": 0.9, "favoriteName": fn,
+                }]})
+                eid = (r.get("elements") or [{}])[0].get("elementId")
+                d = bridge.tapir("GetDetailsOfElements", {"elements": [{"elementId": eid}]})
+                det = (d.get("detailsOfElements") or [{}])[0].get("details") or {}
+                lp = (det.get("libPart") or {}).get("name")
+                print(f"  5d favori+sillHeight creation -> libPart={lp!r}, sillHeight={det.get('sillHeight')}")
+        except Exception as exc:
+            print(f"  5d échoué : {str(exc)[:150]}")
+        # 5e. v2.59 : favori réappliqué SANS keepFields : sillHeight est-il réinitialisé ?
+        try:
+            r = bridge.tapir("CreateWindows", {"windowsData": [{
+                "ownerWallId": wall_id, "centerOffset": 2.9, "width": 0.8,
+                "height": 1.2, "sillHeight": 0.9,
+            }]})
+            eid = (r.get("elements") or [{}])[0].get("elementId")
+            favs = bridge.tapir("GetFavoritesByType", {"elementType": "Window"}).get("favorites", [])
+            if favs and eid is not None:
+                fn = favs[0].get("name") if isinstance(favs[0], dict) else favs[0]
+                bridge.tapir("ApplyFavoritesToElements", {
+                    "favoritesToApply": [{"elementId": eid, "favorite": fn}],
+                    "applySettings": True, "applyClassifications": True,
+                    "applyCategories": True, "applyProperties": False})
+                d2 = bridge.tapir("GetDetailsOfElements", {"elements": [{"elementId": eid}]})
+                det2 = (d2.get("detailsOfElements") or [{}])[0].get("details") or {}
+                lp2 = (det2.get("libPart") or {}).get("name")
+                print(f"  5e favori SANS keepFields -> libPart={lp2!r}, sillHeight={det2.get('sillHeight')}")
+        except Exception as exc:
+            print(f"  5e échoué : {str(exc)[:150]}")
 
     print("-" * 64)
     if all(ok):
@@ -736,9 +947,9 @@ def import_module(data, pick_origin=False):
         rep = bridge.tapir("GetAttributesByType", {"attributeType": "Composite"})
         composites_par_nom = lire_composites(rep)
         noms_lus = sorted({v[0] for lst in composites_par_nom.values() for v in lst})
-        print(f"  {len(noms_lus)} composite(s) lu(s) dans le gabarit Archicad :")
-        for nm in noms_lus[:300]:
-            print(f"    - {nm}")
+        # v2.58 : liste des composites retirée de la console (trop verbeuse) —
+        # seul le compte est affiché ; les résolutions restent loguées une par une.
+        print(f"  {len(noms_lus)} composite(s) lu(s) dans le gabarit Archicad.")
     except Exception as exc:
         print(f"  ! GetAttributesByType indisponible ({exc}) : composites non appliqués.")
 
@@ -867,6 +1078,112 @@ def import_module(data, pick_origin=False):
             _c = cle_mur(_f, _seg)
             cle_count[_c] = cle_count.get(_c, 0) + 1
 
+    # v2.30 : jonctions « séparées par une charpente » — pour chaque côté d'une
+    # unité, l'écart (m) avec un voisin accolé dont le côté commun est en
+    # charpente (nature="charpente" d'un côté ou de l'autre), 0 sinon.
+    # Sert à faire rejoindre les revêtements intérieurs à l'axe de la charpente
+    # (milieu de l'écart), comme le revêtement de plancher.
+    _sep_cache = {}
+
+    def separation(unite, charpente_only):
+        """Écarts (m) avec les voisins accolés, par côté : charpente_only=True ->
+        seulement si le côté commun est en charpente (jonction charpente) ;
+        False -> seulement si le côté commun est un MUR (jonction mur/mur)."""
+        key0 = (unite.get("id", "m0"), charpente_only)
+        if key0 in _sep_cache:
+            return _sep_cache[key0]
+        du = unite.get("dimensions") or {}
+        bx, by = float(unite.get("x", 0.0)), float(unite.get("y", 0.0))
+        L0, l0 = float(du.get("longueur", 0.0)), float(du.get("largeur", 0.0))
+        out = {"nord": 0.0, "sud": 0.0, "est": 0.0, "ouest": 0.0}
+        opp = {"nord": "sud", "sud": "nord", "est": "ouest", "ouest": "est"}
+        for side in ("nord", "sud", "est", "ouest"):
+            fU = (unite.get("murs") or {}).get(side) or {}
+            for V in unites:
+                if V is unite:
+                    continue
+                dv = V.get("dimensions") or {}
+                vx, vy = float(V.get("x", 0.0)), float(V.get("y", 0.0))
+                vL, vl = float(dv.get("longueur", 0.0)), float(dv.get("largeur", 0.0))
+                fV = (V.get("murs") or {}).get(opp[side]) or {}
+                carU = str(fU.get("nature") or "").lower() == "charpente"
+                carV = str(fV.get("nature") or "").lower() == "charpente"
+                if charpente_only and not (carU or carV):
+                    continue
+                if not charpente_only and (carU or carV):
+                    continue
+                ovY = vy < by + l0 - 1e-6 and vy + vl > by + 1e-6
+                ovX = vx < bx + L0 - 1e-6 and vx + vL > bx + 1e-6
+                if side == "est":
+                    g = vx - (bx + L0)
+                    if 0 < g <= 0.6 and ovY:
+                        out[side] = g
+                elif side == "ouest":
+                    g = bx - (vx + vL)
+                    if 0 < g <= 0.6 and ovY:
+                        out[side] = g
+                elif side == "sud":
+                    g = vy - (by + l0)
+                    if 0 < g <= 0.6 and ovX:
+                        out[side] = g
+                else:
+                    g = by - (vy + vl)
+                    if 0 < g <= 0.6 and ovX:
+                        out[side] = g
+        _sep_cache[key0] = out
+        return out
+
+    # v2.32 : extrémités des murs placées à l'AXE du mur commun (milieu de
+    # l'écart avec le voisin) quand l'angle à cette extrémité est une jonction
+    # (mur/mur ou charpente) — comme le système des toitures aux jonctions :
+    # murs, revêtements intérieurs ET extérieurs se rejoignent à l'axe.
+    # (ex. deux modules qui se prolongent par les pignons est/ouest.)
+    COINS = {"nord": ("est", "ouest"), "sud": ("ouest", "est"),
+             "est": ("sud", "nord"), "ouest": ("nord", "sud")}
+    axe_par_cle = {}   # cle -> (beg, end, shared_beg, shared_end)
+    for unite, segments in segments_par_unite:
+        uid = unite.get("id", "m0")
+        sepC = separation(unite, True)
+        sepM = separation(unite, False)
+        sep = {s: max(sepC[s], sepM[s]) for s in ("nord", "sud", "est", "ouest")}
+        du = unite.get("dimensions") or {}
+        bx, by = float(unite.get("x", 0.0)), float(unite.get("y", 0.0))
+        L0, l0 = float(du.get("longueur", 0.0)), float(du.get("largeur", 0.0))
+        for face_key, seg in segments.items():
+            cle = alias.get((uid, face_key))
+            if cle is None:
+                continue
+            beg, end = seg["beg"], seg["end"]
+            sb = se = False
+            if face_key == "nord":
+                if sep["est"] > 0:
+                    beg = (bx + L0 + sep["est"] / 2.0, by); sb = True
+                if sep["ouest"] > 0:
+                    end = (bx - sep["ouest"] / 2.0, by); se = True
+            elif face_key == "sud":
+                if sep["ouest"] > 0:
+                    beg = (bx - sep["ouest"] / 2.0, by + l0); sb = True
+                if sep["est"] > 0:
+                    end = (bx + L0 + sep["est"] / 2.0, by + l0); se = True
+            elif face_key == "est":
+                if sep["sud"] > 0:
+                    beg = (bx + L0, by + l0 + sep["sud"] / 2.0); sb = True
+                if sep["nord"] > 0:
+                    end = (bx + L0, by - sep["nord"] / 2.0); se = True
+            else:  # ouest
+                if sep["nord"] > 0:
+                    beg = (bx, by - sep["nord"] / 2.0); sb = True
+                if sep["sud"] > 0:
+                    end = (bx, by + l0 + sep["sud"] / 2.0); se = True
+            # mur partagé : on fusionne (une extrémité partagée suffit)
+            prev = axe_par_cle.get(cle)
+            if prev is None:
+                axe_par_cle[cle] = (beg, end, sb, se)
+            else:
+                axe_par_cle[cle] = (
+                    beg if sb else prev[0], end if se else prev[1],
+                    sb or prev[2], se or prev[3])
+
     # Pignons (deux pentes à pignon) PAR MODULE : chaque côté est/ouest monte
     # jusqu'au faîtage de SA toiture — y compris un mur est/ouest PARTAGÉ entre
     # deux modules accolés (v2.18 : c'est un pignon intérieur, mur central
@@ -964,6 +1281,10 @@ def import_module(data, pick_origin=False):
         couches = seg.get("couches") or [{"role": "mur", "favori": seg.get("favori", ""),
                                           "epaisseur": seg["epaisseur"]}]
         nx, ny = NORMALES_EXT.get(seg["face"], (0.0, 0.0))
+        # v2.32 : extrémités à l'AXE du mur commun aux jonctions avec un voisin
+        # (mur/mur ou charpente) — mur, revêtement intérieur et extérieur
+        # se rejoignent à l'axe, comme les toitures.
+        ab, ae, sb, se = axe_par_cle.get(cle, (seg["beg"], seg["end"], False, False))
         favori_seg = favori_de(seg, FAVORIS_MURS, seg["type"])
         ep_int = next((float(c.get("epaisseur") or 0.0) for c in couches
                        if c.get("role") == "interieur"), 0.0)
@@ -977,18 +1298,21 @@ def import_module(data, pick_origin=False):
                 continue   # « pas de revêtement » ou épaisseur nulle : rien créé
             role = str(couche.get("role") or "mur")
             d = decalage.get(role, 0.0)
-            beg_l = (seg["beg"][0] + nx * d, seg["beg"][1] + ny * d)
-            end_l = (seg["end"][0] + nx * d, seg["end"][1] + ny * d)
+            beg_l = (ab[0] + nx * d, ab[1] + ny * d)
+            end_l = (ae[0] + nx * d, ae[1] + ny * d)
             if role == "exterieur":
-                # v2.26 : le revêtement EXTÉRIEUR dépasse d'une épaisseur de MUR à
-                # chaque extrémité, pour se rejoindre aux angles EXTÉRIEURS.
-                # Le revêtement INTÉRIEUR n'est PAS rallongé : le coin intérieur
-                # est la ligne directrice elle-même.
+                # v2.26/v2.32 : aux extrémités LIBRES, le revêtement EXTÉRIEUR dépasse
+                # d'une épaisseur de MUR (angle extérieur) ; aux extrémités en
+                # JONCTION, il est déjà à l'axe du mur commun (rien de plus).
                 dx, dy = end_l[0] - beg_l[0], end_l[1] - beg_l[1]
                 ln = math.hypot(dx, dy) or 1.0
                 ux, uy = dx / ln, dy / ln
-                beg_l = (beg_l[0] - ux * ep_mur, beg_l[1] - uy * ep_mur)
-                end_l = (end_l[0] + ux * ep_mur, end_l[1] + uy * ep_mur)
+                if not sb:
+                    beg_l = (beg_l[0] - ux * ep_mur, beg_l[1] - uy * ep_mur)
+                if not se:
+                    end_l = (end_l[0] + ux * ep_mur, end_l[1] + uy * ep_mur)
+            # mur et revêtement intérieur : aux jonctions l'extrémité est déjà à
+            # l'axe (ab/ae) ; aux coins libres, le coin = la ligne directrice.
             wall_role_axes.setdefault(cle, {})[role] = (beg_l, end_l)
             beg_e, end_e = axes_envoi_pt(beg_l, end_l)
             item = {
@@ -1112,8 +1436,15 @@ def import_module(data, pick_origin=False):
             bkey = cle_ligne(extremites[0], extremites[1])
             if bkey not in poutre_vues:
                 poutre_vues.add(bkey)
-                beams_data.append({"begCoordinate": tr(extremites[0]),
-                                   "endCoordinate": tr(extremites[1]),
+                # v2.30 : la poutre arrive aux EXTRÉMITÉS des poteaux (leurs bords
+                # extérieurs), pas à leur axe : rallongée de ep_ch/2 à chaque bout.
+                bdx, bdy = extremites[1][0] - extremites[0][0], extremites[1][1] - extremites[0][1]
+                bln = math.hypot(bdx, bdy) or 1.0
+                bux, buy = bdx / bln, bdy / bln
+                b0 = (extremites[0][0] - bux * ep_ch / 2.0, extremites[0][1] - buy * ep_ch / 2.0)
+                b1 = (extremites[1][0] + bux * ep_ch / 2.0, extremites[1][1] + buy * ep_ch / 2.0)
+                beams_data.append({"begCoordinate": tr(b0),
+                                   "endCoordinate": tr(b1),
                                    "zCoordinate": H_u, "width": ep_ch, "height": ep_ch})
             for pt in extremites:
                 ckey = (round(pt[0], 2), round(pt[1], 2))
@@ -1293,19 +1624,16 @@ def import_module(data, pick_origin=False):
                 """Élargissement de la couverture sur ce côté : débord compté
                 depuis la face extérieure du mur = depassee + épaisseur TOTALE
                 du mur (pile de couches, v2.25). Côté partagé entre deux modules
-                accolés : règle de la 3D — est/ouest : le module amont recouvre
-                tout l'écart (le voisin démarre à 0, sa ligne directrice) ;
-                nord/sud : chacun prolonge de la moitié de l'écart, les deux
-                couvertures se rejoignent au milieu du mur partagé."""
+                accolés (v2.33) : chacun prolonge de la moitié de l'écart, les
+                deux couvertures se rejoignent à l'AXE (milieu du mur partagé),
+                comme les murs découpés à l'axe (v2.32)."""
                 seg = segments.get(face_key)
                 ep_tot = float(seg.get("epaisseur_totale") or seg.get("epaisseur") or 0.255) if seg else 0.255
                 g = 0.0 if (geo == "monopente" and face_key == "nord") else voisin_gap(face_key)
                 if g > 0:
-                    if face_key == "est":
-                        return g          # amont : recouvre le mur commun
-                    if face_key == "ouest":
-                        return 0.0        # aval : démarre à sa ligne directrice
-                    return g / 2.0        # nord/sud : moitié de l'écart chacun
+                    # v2.33 : jonction -> les deux couvertures se rejoignent à l'AXE
+                    # (milieu de l'écart), comme les murs découpés à l'axe (v2.32)
+                    return g / 2.0
                 if seg is None:
                     return deb + 0.255      # rive en charpente : débord + ép. mur
                 return deb + ep_tot
@@ -1317,6 +1645,16 @@ def import_module(data, pick_origin=False):
             x0, x1 = bx - dO, bx + L + dE
             y0, y1 = by - dN, by + l + dS
             emp_v = [tr((x0, y0)), tr((x1, y0)), tr((x1, y1)), tr((x0, y1))]
+            # v2.30 : sous-face (revêtement inférieur) — sur un côté séparé d'un
+            # voisin par une CHARPENTE, elle est élargie de la moitié de l'écart :
+            # les sous-faces de deux modules séparés par une charpente se
+            # rejoignent à l'axe (comme les revêtements intérieurs des murs).
+            sepC = separation(unite, True)
+            ex0 = bx - sepC["ouest"] / 2.0
+            ex1 = bx + L + sepC["est"] / 2.0
+            ey0 = by - sepC["nord"] / 2.0
+            ey1 = by + l + sepC["sud"] / 2.0
+            emp_inf = [tr((ex0, ey0)), tr((ex1, ey0)), tr((ex1, ey1)), tr((ex0, ey1))]
 
             # v2.26 : la LIGNE DIRECTRICE (niveau H) = couche COMPLEXE (référence).
             # Niveaux exprimés en DELTA vertical depuis H ; l'épaisseur d'une
@@ -1329,7 +1667,7 @@ def import_module(data, pick_origin=False):
             if couches_toit:
                 niveaux = [(0.0, emp_c, "complexe", comp_comp)]
                 if ep_inf > 0 or comp_inf:
-                    niveaux.append((-ep_inf, emp_c, "inferieur", comp_inf))
+                    niveaux.append((-ep_inf, emp_inf, "inferieur", comp_inf))
                 niveaux.append((ep_comp, emp_v, "couverture", comp_couv))
             else:
                 niveaux = [(0.0, emp_c, "complexe", toit_comp_id),
@@ -1368,7 +1706,7 @@ def import_module(data, pick_origin=False):
                 # Arêtes du polygone pivot : 0=nord, 1=est, 2=sud, 3=ouest.
                 # v2.25 : niveaux = pile de couches ; seul le revêtement de
                 # toiture (couverture) a des débords d'arête.
-                for delta, _emp, role, comp in niveaux:
+                for delta, emp, role, comp in niveaux:
                     ovs = (dN, dE, dS, dO) if role == "couverture" else (0.0, 0.0, 0.0, 0.0)
                     pe = []
                     for i, ov in enumerate(ovs):
@@ -1376,7 +1714,11 @@ def import_module(data, pick_origin=False):
                         if pignon and i in (1, 3):   # arêtes est/ouest = pignon
                             li["angleType"] = "Gable"
                         pe.append({"levels": [li]})
-                    add_roof(delta, emp_c, False, role=role, comp=comp,
+                    # v2.30 : la couverture garde le polygone de la ligne directrice
+                    # (débords via pivotEdges) ; la sous-face prend son polygone élargi
+                    # (emp_inf) sur les jonctions charpente.
+                    poly = emp_c if role == "couverture" else emp
+                    add_roof(delta, poly, False, role=role, comp=comp,
                              multi={"levels": [{"levelHeight": 0.0,
                                                 "levelAngle": angle}],
                                     "pivotEdges": pe})
@@ -1495,8 +1837,12 @@ def import_module(data, pick_origin=False):
     if wall_layer_ids and couv_par_uid:
         links = []
         for cle, wids in wall_layer_ids.items():
+            # v2.31 : seule la toiture du (des) module(s) auquel appartient le mur
+            # sert de découpe — les extrémités des murs étant rognées au centre des
+            # parties communes (v2.30), la toiture du module couvre tout le mur.
+            uids = set(unites_par_cle.get(cle, ()))
             for wid in wids:   # v2.25 : chaque COUCHE du mur est découpée
-                for uid in unites_par_cle.get(cle, ()):
+                for uid in uids:
                     for roof_id in couv_par_uid.get(uid, ()):
                         links.append({
                             "targetId": wid,
@@ -1521,12 +1867,25 @@ def import_module(data, pick_origin=False):
     # libre) sont créées dans les couches de revêtement (couverture et
     # sous-face). Chaque pente de l'export (toiture.pents[]) a un n° de module
     # (1-based) et un versant (nord/sud). Position mesurée le long du bas de
-    # pente depuis le coin ouest ; l'ancre est placée au centre de la fenêtre
-    # en projection plan (profondeur projetée = hauteur * cos(pente)).
+    # pente depuis le coin ouest ; v2.30 : ancre au BAS de la fenêtre (axe en x),
+    # alignement par le bas de toutes les fenêtres d'un pent.
     pents = toit.get("pents") or []
     if pents and toit_par_uid_versant:
         skylights_data = []
         skylights_favs = []   # favori d'origine de chaque skylight (le repli peut vider item)
+        trous_spec = []       # v2.39 : specs des trous, créés en phase 2 (anchorLevel)
+        skylight_vus = set()  # v2.30 : anti-doublon (uid, versant, fenêtre)
+        pent_vus = set()      # v2.32 : anti-doublon au niveau du pent (uid, versant)
+        # v2.34 : favoris de skylights du gabarit — un favori inconnu (faute de
+        # frappe, ex. « BARRAC-FENTOIT114 ») est retiré ITEM PAR ITEM avant envoi :
+        # le repli par lot de tapir_cree recréerait TOUT le lot -> doublons.
+        fav_noms_skylight = set()
+        try:
+            rep = bridge.tapir("GetFavoritesByType", {"elementType": "Skylight"})
+            for f in rep.get("favorites", []):
+                fav_noms_skylight.add(f.get("name") if isinstance(f, dict) else f)
+        except Exception:
+            pass
         for pent in pents:
             idx = pent.get("module")
             uid = None
@@ -1539,6 +1898,12 @@ def import_module(data, pick_origin=False):
             if unite is None or not d_toits:
                 continue
             versant = str(pent.get("versant") or "").lower()
+            # v2.32 : un même pent n'est traité qu'une seule fois, même s'il
+            # apparaît en double dans l'export (pas de fenêtre de toit en doublon)
+            pent_key = (uid, versant)
+            if pent_key in pent_vus:
+                continue
+            pent_vus.add(pent_key)
             dims_u = unite["dimensions"]
             l_u = float(dims_u["largeur"])
             bx = float(unite.get("x", 0.0))
@@ -1552,63 +1917,288 @@ def import_module(data, pick_origin=False):
             if owner is None:
                 continue
             angle_v = angle_sud if versant == "sud" else angle_nord
+            # v2.30 : RÉFÉRENCE = la fenêtre dans le COMPLEXE, avec ALIGNEMENT PAR
+            # LE BAS : l'ancre est le bas de la fenêtre (axe de la fenêtre en x =
+            # centre, y = rive/bas de pente de la ligne directrice), posé sur le plan
+            # de la toiture (z = niveau de la couche à la rive). Toutes les fenêtres
+            # d'un pent sont ainsi à la même hauteur, et les baies libres des
+            # revêtements au même endroit (z dérivé de l'ancre complexe par le seul
+            # écart vertical entre les plans des couches).
+            H_u = float(dims_u.get("hauteur", 0.0))
+            lvl_cplx = toit_niveau.get((uid, "complexe", versant))
+            if lvl_cplx is None:
+                lvl_cplx = toit_niveau.get((uid, "complexe", None), H_u)
 
-            def ancre(role, x_exp, y_exp, proj):
-                """Anchor (x, y, z) — v2.27 : le z est calé sur le PLAN DE LA COUCHE
-                concernée (niveau de la couche + montée selon la pente du versant),
-                même référence de hauteur pour la fenêtre du complexe et les baies
-                libres des revêtements : plus de décalage de hauteur entre couches."""
+            def ancre(role, x_exp, y_exp):
+                """Anchor (x, y, z) — bas de la fenêtre (axe en x), z sur le plan
+                de la couche role à la rive, dérivé de l'ancre de la fenêtre du
+                complexe (référence)."""
                 ap = tr((x_exp, y_exp))
                 d = d_toits.get(role, {})
                 vers = versant if versant in d else (None if None in d else next(iter(d), None))
                 lvl = toit_niveau.get((uid, role, vers))
                 if lvl is None:
-                    lvl = toit_niveau.get((uid, role, None), H)
-                ap["z"] = lvl + proj * math.tan(angle_v)
+                    lvl = toit_niveau.get((uid, role, None), lvl_cplx)
+                ap["z"] = lvl_cplx + (lvl - lvl_cplx)   # plan de la couche, à la rive
                 return ap
 
             for fen in pent.get("fenetres") or []:
                 pr = float(fen.get("position", 0.0))
                 w = float(fen.get("largeur", 0.0))
                 h = float(fen.get("hauteur", 0.0))
-                proj = h * math.cos(angle_v) / 2.0
-                if versant == "sud":
-                    y_exp = by + l_u - proj    # eave sud, vers le faîtage (-Y export)
-                else:
-                    y_exp = by + proj          # eave nord, vers le faîtage (+Y export)
+                # v2.30 : anti-doublon (un même pent ne doit pas recréer la fenêtre)
+                fen_key = (uid, versant, str(fen.get("id") or "%.3f:%.3f:%.3f" % (pr, w, h)))
+                if fen_key in skylight_vus:
+                    continue
+                skylight_vus.add(fen_key)
+                # alignement par le bas : ancre au bas de la fenêtre, sur la rive
+                y_exp = by + l_u if versant == "sud" else by
                 fv = str(fen.get("favori") or "").strip()
                 x_exp = bx + pr + w / 2.0
+                # v2.55 : position en hauteur sur le versant (distance au bas de
+                # pente, mesurée le long du rampant) -> décalage en plan de
+                # ph*cos(pente) vers le faîtage. Les trous des revêtements suivent
+                # seuls : la phase 2 relit l'anchorLevel réel de chaque fenêtre.
+                ph = float(fen.get("positionHauteur") or 0.0)
+                if ph and versant in ("nord", "sud"):
+                    dp = ph * math.cos(angle_v)
+                    y_exp = (y_exp - dp) if versant == "sud" else (y_exp + dp)
+                # v2.31 : RÉFÉRENCE = la position de la fenêtre dans le COMPLEXE
+                # (axe de la fenêtre, bas de la fenêtre sur le plan de la toiture).
+                # Les baies libres des revêtements reprennent EXACTEMENT cette ancre :
+                # plus de décalage de hauteur entre la fenêtre et les trous.
+                ap_ref = ancre("complexe", x_exp, y_exp)
                 # fenêtre de toit sur le complexe (référence) : favori d'origine
                 item = {"ownerId": owner,
-                        "anchorPosition": ancre("complexe", x_exp, y_exp, proj),
+                        "anchorPosition": dict(ap_ref),
                         "width": w, "height": h}
                 if fv:
-                    item["favoriteName"] = fv
+                    if fav_noms_skylight and fv not in fav_noms_skylight:
+                        print(f"  ! Favori skylight « {fv} » introuvable dans le "
+                              f"gabarit : fenêtre créée SANS favori (pas de doublon).")
+                        fv = ""
+                    else:
+                        item["favoriteName"] = fv
                 skylights_data.append(item)
                 skylights_favs.append(fv)
-                # baies libres équivalentes dans les revêtements de toiture
-                for role_rev in ("couverture", "inferieur"):
-                    rev_id = toit_de(role_rev)
-                    if rev_id is None or rev_id == owner:
-                        continue
-                    item_rev = {"ownerId": rev_id,
-                                "anchorPosition": ancre(role_rev, x_exp, y_exp, proj),
-                                "width": w, "height": h}
-                    if FAVORI_LUCARNE_VIDE:
-                        item_rev["favoriteName"] = FAVORI_LUCARNE_VIDE
-                    skylights_data.append(item_rev)
-                    skylights_favs.append(FAVORI_LUCARNE_VIDE)
-        if skylights_data:
+                # v2.39 : les trous (baies libres des revêtements) ne sont pas
+                # créés ici : on mémorise leur spec ; ils seront créés en phase 2
+                # avec le anchorLevel réellement lu sur la fenêtre (l'ancre d'un
+                # skylight est 2D : x, y — la hauteur passe par anchorLevel).
+                trous_spec.append({"item": item, "owner": owner, "angle": angle_v,
+                                   "versant": versant, "lvl_cplx": lvl_cplx,
+                                   "roles": {"couverture": (toit_de("couverture"),
+                                                           float(c_couv.get("epaisseur") or 0.0),
+                                                           toit_niveau.get((uid, "couverture", versant)) or toit_niveau.get((uid, "couverture", None)) or 0.0),
+                                             "inferieur": (toit_de("inferieur"), ep_inf,
+                                                           toit_niveau.get((uid, "inferieur", versant)) or toit_niveau.get((uid, "inferieur", None)) or 0.0)},
+                                   "x": ap_ref["x"], "y": ap_ref["y"],
+                                   "w": w, "h": h, "H_u": H_u})
+        # v2.39 : création EN DEUX PHASES + anti-doublon.
+        # L'ancre d'un skylight est 2D (x, y) : la hauteur passe par anchorLevel
+        # (fixMode "Vertical", relatif au niveau de la toiture propriétaire) —
+        # le z d'anchorPosition est ignoré par Archicad (constaté en v2.38).
+        # Phase 1 : fenêtres seules, puis lecture de leur anchorLevel réel.
+        # Phase 2 : trous au même (x, y) que la fenêtre, avec
+        # anchorLevel = anchorLevel_fenêtre - delta_niveau_couche
+        # (niveau stocké d'une couche = H + delta ; delta = +ep_cplx pour la
+        # couverture, -ep_inf pour la sous-face).
+        def dedup_skylights(data, favs):
+            out_d, out_f, vus = [], [], set()
+            for item, fv in zip(data, favs):
+                ap = item.get("anchorPosition") or {}
+                cle = (str(item.get("ownerId")),
+                       round(float(ap.get("x", 0.0)), 6),
+                       round(float(ap.get("y", 0.0)), 6),
+                       round(float(ap.get("z", 0.0)), 6),
+                       round(float(item.get("width", 0.0)), 6),
+                       round(float(item.get("height", 0.0)), 6))
+                if cle in vus:
+                    continue
+                vus.add(cle)
+                out_d.append(item)
+                out_f.append(fv)
+            return out_d, out_f
+
+        def envoi_skylights(data, favs, etiquette):
+            """Envoi direct (PAS de repli par lot : un favori inconnu ne doit
+            jamais recréer tout le lot -> doublons). Repli item par item si un
+            item est refusé. Retourne (data dédupliquée, favs, elems)."""
+            data, favs = dedup_skylights(data, favs)
+            if not data:
+                return data, favs, []
+            resp = None
             try:
-                resp = bridge.tapir_cree("CreateSkylights", {"skylightsData": skylights_data})
-                print(f"  Fenêtres de toit placées ({len(skylights_data)} skylight(s) : "
-                      f"sur le complexe + baies libres dans les revêtements).")
-                for fv, e in zip(skylights_favs, resp.get("elements", [])):
-                    if fv and e.get("elementId") is not None:
-                        fav_a_appliquer.append((e["elementId"], fv, None))
+                resp = bridge.tapir("CreateSkylights", {"skylightsData": data})
             except Exception as exc:
-                print(f"  ! CreateSkylights indisponible ({exc}) : fenêtres "
-                      f"de toit non placées.")
+                if any("anchorLevel" in d for d in data):
+                    for d in data:
+                        d.pop("anchorLevel", None)
+                        d.pop("fixMode", None)
+                        d.pop("anchorPoint", None)
+                    print(f"  ! anchorLevel/fixMode refusé par CreateSkylights ({exc}) : "
+                          f"repli sans ces champs (z seul).")
+                    try:
+                        resp = bridge.tapir("CreateSkylights", {"skylightsData": data})
+                    except Exception as exc2:
+                        print(f"  ! CreateSkylights indisponible ({exc2}) : "
+                              f"{etiquette} non placés.")
+                        return data, favs, []
+                else:
+                    print(f"  ! CreateSkylights indisponible ({exc}) : "
+                          f"{etiquette} non placés.")
+                    return data, favs, []
+            elems = list(resp.get("elements", [])) if isinstance(resp, dict) else []
+            # repli ITEM PAR ITEM : seuls les items refusés (favori inconnu)
+            # sont recréés, sans favori — jamais le lot entier.
+            if elems and len(elems) == len(data):
+                reprendre = []
+                for i, e in enumerate(elems):
+                    if isinstance(e, dict) and e.get("error") and data[i].get("favoriteName"):
+                        it = dict(data[i])
+                        it.pop("favoriteName", None)
+                        reprendre.append((i, it))
+                if reprendre:
+                    try:
+                        resp2 = bridge.tapir("CreateSkylights",
+                                             {"skylightsData": [it for _, it in reprendre]})
+                        e2 = resp2.get("elements", []) if isinstance(resp2, dict) else []
+                        for (i, _), ne in zip(reprendre, e2):
+                            elems[i] = ne
+                            favs[i] = ""
+                        print(f"  ! {len(reprendre)} skylight(s) recréé(s) sans favori "
+                              f"(favori inconnu du gabarit).")
+                    except Exception as exc2:
+                        print(f"  ! Repli skylights sans favori impossible ({exc2}).")
+            print(f"  {etiquette} : {len(data)} skylight(s) placé(s).")
+            return data, favs, elems
+
+        def set_anchor_level(eid, al):
+            """Règle la ligne de référence (anchorLevel) d'un skylight — essaie
+            plusieurs formes de payload/commandes Tapir, vérifie par relecture."""
+            g = guid_de(eid) if isinstance(eid, dict) else str(eid)
+            al = round(al, 6)
+            candidats = [
+                ("SetDetailsOfElements", {"elements": [{"elementId": eid, "details": {"anchorLevel": al}}]}),
+                ("SetDetailsOfElements", {"elements": [{"elementId": eid}], "details": {"anchorLevel": al}}),
+                ("SetDetailsOfElements", {"elements": [g], "details": {"anchorLevel": al}}),
+                ("SetElementDetails", {"elementId": eid, "details": {"anchorLevel": al}}),
+            ]
+            for cmd, payload in candidats:
+                try:
+                    bridge.tapir(cmd, payload)
+                    det = bridge.tapir("GetDetailsOfElements", {"elements": [{"elementId": eid}]})
+                    dl = det.get("detailsOfElements", []) if isinstance(det, dict) else []
+                    if dl:
+                        lu = (dl[0].get("details") or {}).get("anchorLevel")
+                        if lu is not None and abs(float(lu) - al) < 1e-3:
+                            return True
+                except Exception:
+                    continue
+            return False
+
+        # --- phase 1 : fenêtres de toit (complexe) ---
+        data_fen, skylights_favs, elems_fen = envoi_skylights(
+            skylights_data, skylights_favs, "Fenêtres de toit sur le complexe")
+        # lecture du anchorLevel réel de chaque fenêtre créée
+        al_par_item = {}
+        try:
+            refs = [{"elementId": e["elementId"]} for e in elems_fen
+                    if isinstance(e, dict) and e.get("elementId")]
+            if refs and len(refs) == len(data_fen):
+                det = bridge.tapir("GetDetailsOfElements", {"elements": refs})
+                dl = det.get("detailsOfElements", []) if isinstance(det, dict) else []
+                for it, d in zip(data_fen, dl):
+                    dd = d.get("details") or {}
+                    if dd.get("anchorLevel") is not None:
+                        al_par_item[id(it)] = float(dd["anchorLevel"])
+        except Exception as exc:
+            print(f"  [diag] lecture anchorLevel impossible ({exc})")
+        # --- phase 2 : trous dans les revêtements de toiture (v2.52) ---
+        # On ne peut envoyer que x,y (anchorLevel non réglable sur Tapir 2.0.0).
+        # Passe 1 : trous au même (x, y) que la fenêtre, sans favori (le favori
+        # LUCARNEVIDE force fixMode=Horizontal). Lecture de leur anchorLevel.
+        # Passe 2 : suppression + recréation avec y décalé pour que le TROU
+        # (sa position en plan) tombe sur la fenêtre. Modèle mesuré (v2.49/v2.51) :
+        #   pos_Y(trou) = anchor_y + B_role,  B_role = sin(p)cos(p)*(al_trou@fen - al_fen)
+        # (résidu v2.51 = 0,2*B -> pente 1 ; le anchorLevel du trou ne joue pas)
+        # d'où dy = -B = sin(p)cos(p)*(al_fen - al_trou).
+        # (v2.50 alignait les anchorLevel : faux, déplacer y déplace le trou en plan.)
+        trous_data, trous_favs, trous_meta = [], [], []
+        for spec in trous_spec:
+            for role_rev, (rev_id, ep_role, lvl_role) in spec["roles"].items():
+                if rev_id is None or rev_id == spec["owner"]:
+                    continue
+                item_t = {"ownerId": rev_id,
+                          "anchorPosition": {"x": spec["x"], "y": spec["y"],
+                                             "z": lvl_role},
+                          "width": spec["w"], "height": spec["h"]}
+                trous_data.append(item_t)
+                trous_favs.append("")
+                trous_meta.append({"spec": spec, "lvl_role": lvl_role})
+        trous_data, trous_favs, elems_trous = envoi_skylights(
+            trous_data, trous_favs, "Trous (lucarnes vides) passe 1")
+        if trous_data and elems_trous:
+            al_trou = {}
+            try:
+                refs = [{"elementId": e["elementId"]} for e in elems_trous
+                        if isinstance(e, dict) and e.get("elementId")]
+                if refs and len(refs) == len(trous_data):
+                    det = bridge.tapir("GetDetailsOfElements", {"elements": refs})
+                    dl = det.get("detailsOfElements", []) if isinstance(det, dict) else []
+                    for it, d in zip(trous_data, dl):
+                        dd = d.get("details") or {}
+                        if dd.get("anchorLevel") is not None:
+                            al_trou[id(it)] = float(dd["anchorLevel"])
+            except Exception as exc:
+                print(f"  [diag] lecture anchorLevel trous impossible ({exc})")
+            if al_trou:
+                try:
+                    bridge.tapir("DeleteElements",
+                                 {"elements": [{"elementId": e["elementId"]} for e in elems_trous
+                                               if isinstance(e, dict) and e.get("elementId")]})
+                    for it, meta in zip(trous_data, trous_meta):
+                        al_win = al_par_item.get(id(meta["spec"]["item"])) or 0.60
+                        al_t = al_trou.get(id(it))
+                        if al_t is not None:
+                            p = meta["spec"]["angle"]
+                            k = math.sin(p) * math.cos(p)
+                            dy = k * (al_win - al_t)
+                            it["anchorPosition"]["y"] = round(meta["spec"]["y"] + dy, 6)
+                    _, trous_favs, elems_trous = envoi_skylights(
+                        trous_data, trous_favs, "Trous passe 2, position alignée sur la fenêtre")
+                except Exception as exc:
+                    print(f"  ! Recréation des trous impossible ({exc}) : trous laissés en passe 1.")
+        # favoris à appliquer (v2.28 : conserver width/height) + diagnostic
+        tous_elems = list(elems_fen) + list(elems_trous)
+        tous_favs = list(skylights_favs) + list(trous_favs)
+        for fv, e in zip(tous_favs, tous_elems):
+            if fv and isinstance(e, dict) and e.get("elementId") is not None:
+                # v2.43 : on conserve AUSSI anchorLevel/anchorPosition lors de la
+                # réapplication du favori en fin d'import — sinon le favori
+                # LUCARNEVIDE/FENTOIT remet sa propre ligne de référence et les
+                # fenêtres de toit se décalent à la toute fin du script.
+                fav_a_appliquer.append((e["elementId"], fv,
+                                        ("width", "height", "anchorLevel", "anchorPosition")))
+        try:
+            refs = [{"elementId": e["elementId"]} for e in tous_elems
+                    if isinstance(e, dict) and e.get("elementId")]
+            if refs:
+                det = bridge.tapir("GetDetailsOfElements", {"elements": refs})
+                dl = det.get("detailsOfElements", []) if isinstance(det, dict) else []
+                print("  [diag v2.42] niveaux toitures :",
+                      {str(k): round(v, 4) for k, v in toit_niveau.items()})
+                print("  [diag v2.42] skylights lus (id, owner, anchor x/y, anchorLevel) :")
+                for d in dl:
+                    dd = d.get("details") or {}
+                    ap = dd.get("anchorPosition") or {}
+                    ow = dd.get("ownerElementId") or {}
+                    g = ow.get("guid") if isinstance(ow, dict) else str(ow)
+                    print("    id=%s owner=%s anchor=(%.4f, %.4f) anchorLevel=%.6f fixMode=%s"
+                          % (d.get("id"), str(g)[-6:], ap.get("x", 0.0), ap.get("y", 0.0),
+                             dd.get("anchorLevel") or 0.0, dd.get("fixMode")))
+        except Exception as exc:
+            print(f"  [diag v2.42] lecture impossible ({exc})")
 
     # --- 4. Ouvertures (de chaque instance, sur le mur canonique) ----------
     # v2.18 : le type d'outil (fenêtre vs porte) est résolu via le favori quand
@@ -1650,6 +2240,10 @@ def import_module(data, pick_origin=False):
                     centre = abs(cy - beg_e[1])
                 else:                                       # mur horizontal
                     centre = abs(cx - beg_e[0])
+                # v2.53 : allège (hauteur d'implantation depuis le bas du mur),
+                # envoyée aussi aux baies libres des revêtements pour que le
+                # trou suive la même hauteur que l'ouvrant.
+                allege = float(ouverture.get("allege") or 0.0)
                 item = {
                     "ownerWallId": wall_id,
                     "centerOffset": centre,
@@ -1661,6 +2255,13 @@ def import_module(data, pick_origin=False):
                     # donc refSide=false mettrait le soleil du mauvais côté).
                     "refSide": True,
                 }
+                if CHAMP_ALLEGE and allege:
+                    item[CHAMP_ALLEGE] = allege
+                    print(f"  Ouverture {ouverture.get('id', '?')} : allège {allege:.3f} m "
+                          f"envoyée ({CHAMP_ALLEGE}) — favori appliqué après coup avec keepFields.")
+                # v2.59 : favori envoyé à la création AVEC sillHeight quand allège
+                # (les champs explicites priment sur le favori, comme pour les
+                # skylights) ; n'est plus réappliqué après coup dans ce cas.
                 if favori_ouv:
                     item["favoriteName"] = favori_ouv
                 # Routage fenêtre/porte : le favori prime sur le champ type.
@@ -1678,7 +2279,7 @@ def import_module(data, pick_origin=False):
                     if el.get("error"):
                         raise RuntimeError(str(el["error"]))
                     n_ok += 1
-                    if favori_ouv and el.get("elementId") is not None:
+                    if favori_ouv and el.get("elementId") is not None and not (CHAMP_ALLEGE and allege):
                         fav_a_appliquer.append((el["elementId"], favori_ouv, None))
                 except Exception as exc:
                     n_err += 1
@@ -1706,11 +2307,18 @@ def import_module(data, pick_origin=False):
                         "height": ouverture["hauteur"],
                         "refSide": True,
                     }
+                    if CHAMP_ALLEGE and allege:
+                        item_rev[CHAMP_ALLEGE] = allege
+                    # v2.59 : BAIELIBRE envoyé à la création avec sillHeight (idem ouvrant)
                     if FAVORI_BAIE_LIBRE:
                         item_rev["favoriteName"] = FAVORI_BAIE_LIBRE
                     try:
-                        bridge.tapir_cree("CreateWindows", {"windowsData": [item_rev]})
+                        resp_rev = bridge.tapir_cree("CreateWindows", {"windowsData": [item_rev]})
                         n_baies += 1
+                        el_rev = (resp_rev.get("elements") or [{}])[0]
+                        if (FAVORI_BAIE_LIBRE and el_rev.get("elementId") is not None
+                                and not (CHAMP_ALLEGE and allege)):
+                            fav_a_appliquer.append((el_rev["elementId"], FAVORI_BAIE_LIBRE, None))
                     except Exception as exc:
                         print(f"  ! Baie libre {ouverture.get('id', '?')} non placée "
                               f"dans le revêtement {role_rev} ({face_key}/{uid}) : {exc}")
@@ -1765,7 +2373,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Importe un module Baracca (JSON du configurateur web) "
                     "dans le projet Archicad ouvert.")
-    print("BARACCA-IMPORT v2.28 — Archicad 30 / Tapir >= 2.0 uniquement ; "
+    print("BARACCA-IMPORT v2.59 — Archicad 30 / Tapir >= 2.0 uniquement ; "
           "enveloppe déballée, toutes les instances, murs partagés dédoublonnés "
           "(arrondi cm), miroir Y (Nord correct), murs beg<->end échangés + "
           "Inside (corps vers l'extérieur, face extérieure sur la face opposée "

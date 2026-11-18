@@ -314,8 +314,10 @@ function buildScene(d, env) {
       const segs = [];
       let cursor = 0;
       for (const o of ops) {
+        const a0 = o.allege ?? 0; // allège : partie pleine sous l'ouverture
         if (o.position > cursor + 1e-6) segs.push([cursor, o.position, 0, yMax]);
-        if (o.hauteur < yMax - 1e-6) segs.push([o.position, o.position + o.largeur, o.hauteur, yMax]); // linteau au-dessus
+        if (a0 > 1e-6) segs.push([o.position, o.position + o.largeur, 0, a0]); // allège sous l'ouverture
+        if (a0 + o.hauteur < yMax - 1e-6) segs.push([o.position, o.position + o.largeur, a0 + o.hauteur, yMax]); // linteau au-dessus
         cursor = Math.max(cursor, o.position + o.largeur);
       }
       if (cursor < Lface - 1e-6) segs.push([cursor, Lface, 0, yMax]);
@@ -342,13 +344,14 @@ function buildScene(d, env) {
         scene.add(mesh);
       }
 
-      // ouvertures : panneau sombre posé sur la face extérieure du mur
+      // ouvertures : panneau sombre posé sur la face extérieure du mur, sur l'allège
       for (const o of f.ouvertures || []) {
         const m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), o.type === "porte" ? ouvMatPorte : ouvMatFen);
-        if (face === "nord") { m.scale.set(o.largeur, o.hauteur, 0.05); m.position.set(X0 + o.position + o.largeur / 2, o.hauteur / 2, Z0 - ep - 0.02); }
-        else if (face === "sud") { m.scale.set(o.largeur, o.hauteur, 0.05); m.position.set(X0 + o.position + o.largeur / 2, o.hauteur / 2, Z1 + ep + 0.02); }
-        else if (face === "ouest") { m.scale.set(0.05, o.hauteur, o.largeur); m.position.set(X0 - ep - 0.02, o.hauteur / 2, Z0 + o.position + o.largeur / 2); }
-        else { m.scale.set(0.05, o.hauteur, o.largeur); m.position.set(X1 + ep + 0.02, o.hauteur / 2, Z0 + o.position + o.largeur / 2); }
+        const yOuv = (o.allege ?? 0) + o.hauteur / 2;
+        if (face === "nord") { m.scale.set(o.largeur, o.hauteur, 0.05); m.position.set(X0 + o.position + o.largeur / 2, yOuv, Z0 - ep - 0.02); }
+        else if (face === "sud") { m.scale.set(o.largeur, o.hauteur, 0.05); m.position.set(X0 + o.position + o.largeur / 2, yOuv, Z1 + ep + 0.02); }
+        else if (face === "ouest") { m.scale.set(0.05, o.hauteur, o.largeur); m.position.set(X0 - ep - 0.02, yOuv, Z0 + o.position + o.largeur / 2); }
+        else { m.scale.set(0.05, o.hauteur, o.largeur); m.position.set(X1 + ep + 0.02, yOuv, Z0 + o.position + o.largeur / 2); }
         scene.add(m);
       }
     }
@@ -471,7 +474,7 @@ function buildScene(d, env) {
           // la normale "sortante" (vers le haut) sert uniquement au décollement
           const n = new THREE.Vector3().crossVectors(u, s).normalize();
           const out = n.y >= 0 ? n : n.clone().negate();
-          const sc = 0.20 / cos + f.hauteur / 2; // distance le long du rampant depuis le bas de pente
+          const sc = 0.20 / cos + (f.positionHauteur ?? 0) + f.hauteur / 2; // distance le long du rampant depuis le bas de pente
           const m = new THREE.Mesh(new THREE.BoxGeometry(f.largeur, f.hauteur, 0.06), fenMat);
           m.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(u, s, n));
           m.position.copy(E0).addScaledVector(s, sc).addScaledVector(out, 0.05);

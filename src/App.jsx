@@ -455,7 +455,9 @@ const surfaceMenuiserie = (m) =>
 
 function validerOuverture(d, dm, faceKey, o) {
   const L = murLongueurDm(dm, faceKey);
-  return o.position >= POSITION_MIN && o.position + o.largeur <= L && o.hauteur <= dm.hauteur;
+  const allege = o.allege ?? 0;
+  return o.position >= POSITION_MIN && o.position + o.largeur <= L
+    && allege >= 0 && o.hauteur + allege <= dm.hauteur;
 }
 
 /* =================================================================
@@ -857,6 +859,7 @@ function buildExport(d, env) {
       largeur: o.largeur,
       hauteur: o.hauteur,
       position: o.position,
+      allege: +(+(o.allege ?? 0)).toFixed(3), // hauteur d'implantation (appui) en m depuis le bas du mur
       favori: env.menuiseries?.find((x) => x.id === o.menuiserieId)?.favori ?? "", // favori Archicad de la menuiserie
     })),
     };
@@ -948,6 +951,7 @@ function buildExport(d, env) {
             largeur: f.largeur,
             hauteur: f.hauteur,
             position: f.position,
+            positionHauteur: +(+(f.positionHauteur ?? 0)).toFixed(3), // distance au bas de pente le long du versant (m)
             favori: env.fenetresToit?.find((x) => x.id === f.fenetreId)?.favori ?? "",
           })),
         })), // un revêtement de toiture + un intérieur + des fenêtres de toit par pent de chaque module
@@ -1065,6 +1069,25 @@ const fenetreToitProfondeur = (d, toitType, versant, hauteur) =>
   +hauteur * Math.cos((penteOfPent(d, toitType, versant) * Math.PI) / 180);
 // Profondeur par défaut du cadre depuis la ligne directrice du bas de pente (px plan)
 const FENETRE_TOIT_DEP_PX = 20;
+// Run horizontal (rive -> faîtage) du versant, en m
+const runOfVersant = (d, dm, toitType, versant) => {
+  if (toitType === "deuxpentes") {
+    const t1 = Math.tan((pente1Of(d) * Math.PI) / 180);
+    const hF = hauteurFaitageDm(dm, pente1Of(d), pente2Of(d), "deuxpentes");
+    const run1 = t1 > 0 ? Math.min(Math.max(hF / t1, 0), dm.largeur) : dm.largeur / 2;
+    return versant === "sud" ? dm.largeur - run1 : run1;
+  }
+  if (toitType === "monopente") return dm.largeur;
+  if (toitType === "quatrepentes") {
+    const edge = basPenteOf(toitType, versant);
+    return edge === "nord" || edge === "sud" ? dm.largeur / 2 : dm.longueur / 2;
+  }
+  return 0;
+};
+// Longueur du rampant (rive -> faîtage) le long du versant, en m
+const rampantLongueur = (d, dm, toitType, versant) =>
+  runOfVersant(d, dm, toitType, versant)
+  / Math.max(Math.cos((penteOfPent(d, toitType, versant) * Math.PI) / 180), 1e-6);
 // Liste des fenêtres de toit d'un pent
 export const fenetresOfPent = (d, instId, versant) => d.fenetresToit?.[instId]?.[versant] || [];
 
@@ -1271,11 +1294,13 @@ function Plan({ d, murs, charpente, toitType, selectedFace, planSel, selInst, cu
             const hProj = fenetreToitProfondeur(d, toitType, versant, f.hauteur) * scale; // profondeur projetée (px)
             const wPx = f.largeur * scale;
             const dep = FENETRE_TOIT_DEP_PX; // 20 px depuis le bas de pente
+            // hauteur sur le versant : projection en plan = positionHauteur × cos(pente)
+            const phPx = (f.positionHauteur ?? 0) * Math.cos((penteOfPent(d, toitType, versant) * Math.PI) / 180) * scale;
             let rx, ry, rw, rh;
-            if (edge === "nord") { rx = x + f.position * scale; ry = y + dep; rw = wPx; rh = hProj; }
-            else if (edge === "sud") { rx = x + f.position * scale; ry = y + l - dep - hProj; rw = wPx; rh = hProj; }
-            else if (edge === "ouest") { rx = x + dep; ry = y + f.position * scale; rw = hProj; rh = wPx; }
-            else { rx = x + L - dep - hProj; ry = y + f.position * scale; rw = hProj; rh = wPx; } // est
+            if (edge === "nord") { rx = x + f.position * scale; ry = y + dep + phPx; rw = wPx; rh = hProj; }
+            else if (edge === "sud") { rx = x + f.position * scale; ry = y + l - dep - hProj - phPx; rw = wPx; rh = hProj; }
+            else if (edge === "ouest") { rx = x + dep + phPx; ry = y + f.position * scale; rw = hProj; rh = wPx; }
+            else { rx = x + L - dep - hProj - phPx; ry = y + f.position * scale; rw = hProj; rh = wPx; } // est
             return (
               <rect key={`${inst.id}-${versant}-${i}`} x={rx} y={ry} width={rw} height={rh}
                 fill="rgba(37,99,235,0.10)" stroke="#2563eb" strokeWidth="1.5" strokeDasharray="4 3"
@@ -1815,7 +1840,7 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
             <line x1={seg.x0s} y1={seg.yToit} x2={seg.x0s} y2={yPlancher} stroke="#57534e" strokeWidth="1" strokeDasharray="5 4" />
             <line x1={seg.x0s + seg.Ls} y1={seg.yToit} x2={seg.x0s + seg.Ls} y2={yPlancher} stroke="#57534e" strokeWidth="1" strokeDasharray="5 4" />
             {seg.face?.actif && seg.face.ouvertures.map((o, j) => (
-              <rect key={j} x={ox(o, seg)} y={yPlancher - o.hauteur * scale}
+              <rect key={j} x={ox(o, seg)} y={yPlancher - (o.allege ?? 0) * scale - o.hauteur * scale}
                 width={o.largeur * scale} height={o.hauteur * scale}
                 fill={o.type === "porte" ? "#7c2d12" : "#0284c7"} rx="2" />
             ))}
@@ -1884,7 +1909,8 @@ function Elevation({ d, murs, planchers, surfaces, interieurs, couvertures, char
                 const x = ox(f, seg);
                 const wPx = f.largeur * scale;
                 const hVert = Math.max(6, f.hauteur * sinP * scale);
-                const yLow = seg.yToit - dWin * tanP * scale;
+                // hauteur sur le versant : le bas de la fenêtre monte de positionHauteur le long du rampant
+                const yLow = seg.yToit - (dWin + (f.positionHauteur ?? 0)) * tanP * scale;
                 return (
                   <rect key={j} x={x} y={yLow - hVert} width={wPx} height={hVert}
                     fill="#ffffff" stroke="#2563eb" strokeWidth="1.5" rx="1"
@@ -2489,7 +2515,8 @@ export default function App() {
     setFace(selectedFace, {
       ouvertures: [
         ...face.ouvertures,
-        { menuiserieId: def?.id ?? null, type: def?.type || "baie", largeur, hauteur, position },
+        { menuiserieId: def?.id ?? null, type: def?.type || "baie", largeur, hauteur, position,
+          allege: def?.type === "porte" ? 0 : (def?.type === "fenetre" ? 0.9 : 0) },
       ],
     });
     setAddOpen(false);
@@ -2521,6 +2548,7 @@ export default function App() {
   const pentSel = selPent ? pentsAll.find((pp) => pp.instId === selPent.instId && pp.versant === selPent.versant) : null;
   const fenetresPent = pentSel ? fenetresOfPent(d, pentSel.instId, pentSel.versant) : [];
   const basPenteLen = pentSel ? basPenteLongueur(dimsOf(d, env, instOf(d, pentSel.instId)), toitType, pentSel.versant) : 0;
+  const rampantLen = pentSel ? rampantLongueur(d, dimsOf(d, env, instOf(d, pentSel.instId)), toitType, pentSel.versant) : 0;
   const setFenetres = (list) => {
     if (!pentSel) return;
     setD((prev) => ({
@@ -2531,7 +2559,8 @@ export default function App() {
       },
     }));
   };
-  const validerFenetre = (f) => f.position >= POSITION_MIN - 1e-9 && f.position + f.largeur <= basPenteLen + 1e-9;
+  const validerFenetre = (f) => f.position >= POSITION_MIN - 1e-9 && f.position + f.largeur <= basPenteLen + 1e-9
+    && (f.positionHauteur ?? 0) >= -1e-9 && (f.positionHauteur ?? 0) + f.hauteur <= rampantLen + 1e-9;
   const ouvrirAjoutFen = () => {
     setAddFenId(env.fenetresToit?.[0]?.id || "");
     setAddFenError("");
@@ -2550,7 +2579,7 @@ export default function App() {
       setAddFenError(`Plus de place sur ce pent (${fmtCm(basPenteLen)} cm) pour cette fenêtre (${fmtCm(largeur)} cm) à partir de ${fmtCm(position)} cm.`);
       return;
     }
-    setFenetres([...fenetresPent, { fenetreId: def?.id ?? null, largeur, hauteur, position }]);
+    setFenetres([...fenetresPent, { fenetreId: def?.id ?? null, largeur, hauteur, position, positionHauteur: 0 }]);
     setAddFenOpen(false);
     setAddFenError("");
   };
@@ -3529,6 +3558,10 @@ export default function App() {
                               </Field>
                             </>
                           )}
+                          <Field label="Allège (cm)">
+                            <input type="number" step="0.1" min="0" value={Math.round((o.allege ?? 0) * 1000) / 10}
+                              onChange={(e) => updateOuverture(i, { allege: Math.min(Math.max(Math.round((+e.target.value || 0) * 10) / 1000, 0), Math.max(0, dmSel.hauteur - o.hauteur)) })} />
+                          </Field>
                           <Field label="position sur le mur">
                             <div className="stepper">
                               <button type="button" className="btn small step-arrow"
@@ -3553,7 +3586,7 @@ export default function App() {
                         <div className="field-error">
                           Position autorisée : entre {fmtCm(POSITION_MIN)} cm et {fmtCm(Math.max(0, murLongueurDm(dmSel, selectedFace) - o.largeur))} cm
                           depuis l'origine — l'ouverture ne doit dépasser ni le mur ({fmtCm(murLongueurDm(dmSel, selectedFace))} cm)
-                          ni la hauteur ({fmtCm(dmSel.hauteur)} cm).
+                          ni la hauteur ({fmtCm(dmSel.hauteur)} cm). Allège autorisée : 0 à {fmtCm(Math.max(0, dmSel.hauteur - o.hauteur))} cm.
                         </div>
                       )}
                     </div>
@@ -3639,6 +3672,10 @@ export default function App() {
                         </button>
                       </div>
                     </Field>
+                    <Field label="hauteur sur le versant (cm)">
+                      <input type="number" step="0.1" min="0" value={Math.round((f.positionHauteur ?? 0) * 1000) / 10}
+                        onChange={(e) => updateFen(i, { positionHauteur: Math.min(Math.max(Math.round((+e.target.value || 0) * 10) / 1000, 0), Math.max(0, rampantLen - f.hauteur)) })} />
+                    </Field>
                   </div>
                 </div>
                 <button className="icon-btn danger" onClick={() => removeFen(i)} title="Supprimer la fenêtre de toit" aria-label="Supprimer la fenêtre de toit">
@@ -3648,7 +3685,8 @@ export default function App() {
                 {!validerFenetre(f) && (
                   <div className="field-error">
                     Position autorisée : entre {fmtCm(POSITION_MIN)} cm et {fmtCm(Math.max(0, basPenteLen - f.largeur))} cm
-                    depuis le début du bas de pente ({fmtCm(basPenteLen)} cm).
+                    depuis le début du bas de pente ({fmtCm(basPenteLen)} cm). Hauteur sur le versant autorisée :
+                    0 à {fmtCm(Math.max(0, rampantLen - f.hauteur))} cm (rampant {fmtCm(rampantLen)} cm, fenêtre {fmtCm(f.hauteur)} cm).
                   </div>
                 )}
               </div>
