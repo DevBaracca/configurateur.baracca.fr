@@ -23,8 +23,7 @@
 require_once __DIR__ . '/../includes/admin-auth.php';
 require_once __DIR__ . '/../includes/catalogue.php';
 require_once __DIR__ . '/../includes/configurations.php';
-
-archicad_admin_require_auth();
+require_once __DIR__ . '/../includes/acces.php';
 
 $section = (string) ($_GET['section'] ?? 'modules');
 // Onglets : Structure (Modules, Isolation, Formes, Autonomie, Aménagements), Catalogue (Charpentes,
@@ -39,6 +38,23 @@ if ($section === 'enveloppe') {
 if (!in_array($section, ['modules', 'isolation', 'formes', 'charpentes', 'autonomie', 'amenagements', 'promotions', 'systemes_aut', 'equipements', 'fenetres_toit', 'murs', 'planchers', 'toitures', 'menuiseries', 'surfaces', 'interieurs', 'couvertures', 'rev_plancher', 'modeles'], true)) {
     $section = 'modules';
 }
+
+// Garde-fou : chaque section du configurateur est une rubrique protégée
+// (un vendeur/partenaire n'a accès qu'aux sections cochées dans sa fiche)
+archicad_bo_require('configurateur:' . $section);
+
+// Type de la « Référence Archicad » selon l'onglet actif : structure composite
+// (pile de couches : murs, planchers, toitures, revêtements) ou favori (objet :
+// ouvrant, fenêtre de toit, charpente, système, équipement). Dans les deux cas,
+// l'élément Archicad correspondant est indispensable à l'import du JSON.
+$catRefKind = in_array($section, cat_enveloppe_kinds(), true)
+    ? 'composite'
+    : (in_array($section, ['menuiseries', 'fenetres_toit', 'systemes_aut', 'equipements', 'charpentes'], true) ? 'favori' : '');
+$refBadge = $catRefKind === 'composite'
+    ? ' <span class="admin-ref-badge composite" title="Structure composite Archicad (pile de couches) — indispensable &#224; l&#39;import JSON">structure composite</span>'
+    : ($catRefKind === 'favori'
+        ? ' <span class="admin-ref-badge favori" title="Favori Archicad (objet) — indispensable &#224; l&#39;import JSON">favori</span>'
+        : '');
 
 function cat_redirect(string $section, string $flash, string $err = ''): void
 {
@@ -1086,6 +1102,9 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
         <?php endif; ?>
       </nav>
       <?php if ($groupeActif === $gkey): ?>
+      <?php if ($refBadge !== ''): ?>
+      <p class="admin-hint" style="margin:8px 0 0">Dans cet onglet, la « Référence Archicad » est <?= $catRefKind === 'composite' ? 'une <strong>structure composite</strong> (pile de couches Archicad)' : 'un <strong>favori</strong> (objet Archicad)' ?> — l&#39;élément correspondant est indispensable &#224; l&#39;import du JSON dans Archicad (&#224; conserver dans le fichier).</p>
+      <?php endif; ?>
 
     <?php if ($section === 'menuiseries'): ?>
     <div class="admin-card">
@@ -1101,7 +1120,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
               <th>Nom</th>
               <th>Type</th>
               <th>Dimensions</th>
-              <th>Référence Archicad</th>
+              <th>Référence Archicad<?= $refBadge ?></th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -1181,7 +1200,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
         <hr class="admin-sep">
         <div class="modal-row">
           <div class="admin-form-row">
-            <label for="m-favori">Référence Archicad</label>
+            <label for="m-favori">Référence Archicad<?= $refBadge ?></label>
             <input type="text" id="m-favori" name="favori" value="<?= htmlspecialchars((string) ($editMenuiserie['favori'] ?? '')) ?>" placeholder="Nom de la référence Archicad (ex. Baracca — Porte), vide = aucune">
           </div>
         </div>
@@ -1206,7 +1225,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
               <th>Visuel</th>
               <th>Nom</th>
               <th>Dimensions</th>
-              <th>Référence Archicad</th>
+              <th>Référence Archicad<?= $refBadge ?></th>
               <th>Coût unitaire</th>
               <th>Actions</th>
             </tr>
@@ -1273,7 +1292,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
         <hr class="admin-sep">
         <div class="modal-row">
           <div class="admin-form-row">
-            <label for="ft-favori">Référence Archicad</label>
+            <label for="ft-favori">Référence Archicad<?= $refBadge ?></label>
             <input type="text" id="ft-favori" name="favori" value="<?= htmlspecialchars((string) ($editFenetreToit['favori'] ?? '')) ?>" placeholder="Nom de la référence Archicad, vide = aucune">
           </div>
         </div>
@@ -1298,7 +1317,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
               <th>Visuel</th>
               <th>Nom</th>
               <th>Dimensions</th>
-              <th>Référence Archicad</th>
+              <th>Référence Archicad<?= $refBadge ?></th>
               <th>Coût unitaire</th>
               <th>Actions</th>
             </tr>
@@ -1365,7 +1384,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
         <hr class="admin-sep">
         <div class="modal-row">
           <div class="admin-form-row">
-            <label for="sa-favori">Référence Archicad</label>
+            <label for="sa-favori">Référence Archicad<?= $refBadge ?></label>
             <input type="text" id="sa-favori" name="favori" value="<?= htmlspecialchars((string) ($editSystemeAut['favori'] ?? '')) ?>" placeholder="Nom de la référence Archicad, vide = aucune">
           </div>
         </div>
@@ -1390,7 +1409,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
               <th>Visuel</th>
               <th>Nom</th>
               <th>Dimensions</th>
-              <th>Référence Archicad</th>
+              <th>Référence Archicad<?= $refBadge ?></th>
               <th>Coût unitaire</th>
               <th>Actions</th>
             </tr>
@@ -1457,7 +1476,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
         <hr class="admin-sep">
         <div class="modal-row">
           <div class="admin-form-row">
-            <label for="eq-favori">Référence Archicad</label>
+            <label for="eq-favori">Référence Archicad<?= $refBadge ?></label>
             <input type="text" id="eq-favori" name="favori" value="<?= htmlspecialchars((string) ($editEquipement['favori'] ?? '')) ?>" placeholder="Nom de la référence Archicad, vide = aucune">
           </div>
         </div>
@@ -2167,7 +2186,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
       <?php else: ?>
         <table class="admin-table">
           <thead>
-            <tr><th>Visuel</th><th>Nom</th><th>Épaisseur</th><th>Couleur</th><th>Référence Archicad</th><th>Actions</th></tr>
+            <tr><th>Visuel</th><th>Nom</th><th>Épaisseur</th><th>Couleur</th><th>Référence Archicad<?= $refBadge ?></th><th>Actions</th></tr>
           </thead>
           <tbody>
             <?php foreach ($charpentes as $ch): $rgbC = $ch['rgb'] ?? [140, 107, 89]; ?>
@@ -2244,7 +2263,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
         <hr class="admin-sep">
         <div class="modal-row">
           <div class="admin-form-row">
-            <label for="ch-favori">Référence Archicad</label>
+            <label for="ch-favori">Référence Archicad<?= $refBadge ?></label>
             <input type="text" id="ch-favori" name="favori" value="<?= htmlspecialchars((string) ($editCharpente['favori'] ?? '')) ?>" placeholder="Nom de la référence Archicad (ex. Baracca — Charpente), vide = aucune">
           </div>
         </div>
@@ -2307,7 +2326,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
       <?php else: ?>
         <table class="admin-table">
           <thead>
-            <tr><th>Visuel</th><th>Nom</th><th>Épaisseur</th><th>Couleur</th><th>Référence Archicad</th><th>Actions</th></tr>
+            <tr><th>Visuel</th><th>Nom</th><th>Épaisseur</th><th>Couleur</th><th>Référence Archicad<?= $refBadge ?></th><th>Actions</th></tr>
           </thead>
           <tbody>
             <?php foreach ($revItems as $f): $rgbF = $f['rgb'] ?? [158, 158, 158]; ?>
@@ -2389,7 +2408,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
         <hr class="admin-sep">
         <div class="modal-row">
           <div class="admin-form-row">
-            <label for="fa-favori">Référence Archicad</label>
+            <label for="fa-favori">Référence Archicad<?= $refBadge ?></label>
             <input type="text" id="fa-favori" name="favori" value="<?= cat_env_field($editEnv, $section, 'favori') ?>" placeholder="Nom de la référence Archicad (ex. Baracca — Bardage bois), vide = aucune">
           </div>
         </div>
@@ -2411,7 +2430,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
       <?php else: ?>
         <table class="admin-table">
           <thead>
-            <tr><th>Visuel</th><th>Nom</th><th>Épaisseur</th><th>Couleur</th><th>Référence Archicad</th><th>Actions</th></tr>
+            <tr><th>Visuel</th><th>Nom</th><th>Épaisseur</th><th>Couleur</th><th>Référence Archicad<?= $refBadge ?></th><th>Actions</th></tr>
           </thead>
           <tbody>
             <?php foreach ($murs as $mur): $rgb = $mur['rgb'] ?? [158, 158, 158]; ?>
@@ -2438,7 +2457,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
       <?php else: ?>
         <table class="admin-table">
           <thead>
-            <tr><th>Visuel</th><th>Nom</th><th>Épaisseur</th><th>Référence Archicad</th><th>Actions</th></tr>
+            <tr><th>Visuel</th><th>Nom</th><th>Épaisseur</th><th>Référence Archicad<?= $refBadge ?></th><th>Actions</th></tr>
           </thead>
           <tbody>
             <?php foreach ($planchers as $p): ?>
@@ -2464,7 +2483,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
       <?php else: ?>
         <table class="admin-table">
           <thead>
-            <tr><th>Visuel</th><th>Nom</th><th>Épaisseur</th><th>Couleur</th><th>Référence Archicad</th><th>Actions</th></tr>
+            <tr><th>Visuel</th><th>Nom</th><th>Épaisseur</th><th>Couleur</th><th>Référence Archicad<?= $refBadge ?></th><th>Actions</th></tr>
           </thead>
           <tbody>
             <?php foreach ($toitures as $t): $rgbT = $t['rgb'] ?? [120, 113, 108]; ?>
@@ -2541,7 +2560,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
         <hr class="admin-sep">
         <div class="modal-row">
           <div class="admin-form-row">
-            <label for="mur-favori">Référence Archicad</label>
+            <label for="mur-favori">Référence Archicad<?= $refBadge ?></label>
             <input type="text" id="mur-favori" name="favori" value="<?= cat_env_field($editEnv, 'murs', 'favori') ?>" placeholder="Nom de la référence Archicad (ex. Baracca — Mur CLT), vide = aucune">
           </div>
         </div>
@@ -2596,7 +2615,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
         <hr class="admin-sep">
         <div class="modal-row">
           <div class="admin-form-row">
-            <label for="pl-favori">Référence Archicad</label>
+            <label for="pl-favori">Référence Archicad<?= $refBadge ?></label>
             <input type="text" id="pl-favori" name="favori" value="<?= cat_env_field($editEnv, 'planchers', 'favori') ?>" placeholder="Nom de la référence Archicad (ex. Baracca — Dalle CLT), vide = aucune">
           </div>
         </div>
@@ -2663,7 +2682,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
         <hr class="admin-sep">
         <div class="modal-row">
           <div class="admin-form-row">
-            <label for="to-favori">Référence Archicad</label>
+            <label for="to-favori">Référence Archicad<?= $refBadge ?></label>
             <input type="text" id="to-favori" name="favori" value="<?= cat_env_field($editEnv, 'toitures', 'favori') ?>" placeholder="Nom de la référence Archicad (ex. Baracca — Toiture deux pentes), vide = aucune">
           </div>
         </div>

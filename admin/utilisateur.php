@@ -8,12 +8,14 @@
 require_once __DIR__ . '/../includes/admin-auth.php';
 require_once __DIR__ . '/../includes/users.php';
 require_once __DIR__ . '/../includes/configurations.php';
+require_once __DIR__ . '/../includes/acces.php';
 
-archicad_admin_require_auth();
+archicad_bo_require('utilisateurs');
 
 $id = (string) ($_GET['id'] ?? '');
 $user = archicad_find_user_by_id($id);
-if ($user === null) {
+if ($user === null || !archicad_bo_user_visible($user)) {
+    // compte introuvable, ou client hors de la zone géographique du vendeur/partenaire
     header('Location: utilisateurs.php');
     exit;
 }
@@ -57,11 +59,13 @@ $nbConfigs = archicad_count_configurations($id);
 $telephone = (string) ($user['telephone'] ?? '');
 
 $pageTitle = 'Fiche client';
-$adminPage = 'utilisateurs';
+$adminPage = 'comptes';
 include __DIR__ . '/../includes/admin-head.php';
 ?>
     <div class="admin-card">
-      <h1><?= htmlspecialchars(trim((string) ($user['prenom'] ?? '') . ' ' . (string) ($user['nom'] ?? ''))) ?></h1>
+      <h1>Gestion des comptes</h1>
+      <?php archicad_comptes_tabs('utilisateurs'); ?>
+      <h2><?= htmlspecialchars(trim((string) ($user['prenom'] ?? '') . ' ' . (string) ($user['nom'] ?? ''))) ?></h2>
       <p><a href="utilisateurs.php">← Retour à la liste des utilisateurs</a></p>
       <?php if ($message !== ''): ?>
         <p class="admin-message admin-message-<?= $message[0] ?>"><?= htmlspecialchars($message[1]) ?></p>

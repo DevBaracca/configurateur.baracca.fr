@@ -7,8 +7,9 @@
  */
 
 require_once __DIR__ . '/../includes/admin-auth.php';
+require_once __DIR__ . '/../includes/acces.php';
 
-archicad_admin_require_auth();
+archicad_bo_require('administrateurs');
 
 $admins = archicad_load_admins();
 $message = null; // ['success'|'error', texte]
@@ -57,12 +58,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $pageTitle = 'Administrateurs';
-$adminPage = 'administrateurs';
+$adminPage = 'comptes';
 include __DIR__ . '/../includes/admin-head.php';
 ?>
     <div class="admin-card">
-      <h1>Administrateurs du configurateur</h1>
-      <p>Les administrateurs ont accès à ce back-office. Le compte initial est défini dans <code>config.php</code> et repris automatiquement dans <code>data/admins.json</code> au premier chargement.</p>
+      <h1>Gestion des comptes</h1>
+      <?php archicad_comptes_tabs('administrateurs'); ?>
+      <p>Les administrateurs ont accès à tout ce back-office. Le compte initial est défini dans <code>config.php</code> et repris automatiquement dans <code>data/admins.json</code> au premier chargement.</p>
       <?php if ($message !== null): ?>
         <p class="admin-message admin-message-<?= $message[0] ?>"><?= htmlspecialchars($message[1]) ?></p>
       <?php endif; ?>

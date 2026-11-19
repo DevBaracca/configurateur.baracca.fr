@@ -76,17 +76,109 @@ function archicad_add_user(array $fields, string $password): array|false
         'email' => $email,
         'nom' => trim((string) ($fields['nom'] ?? '')),
         'prenom' => trim((string) ($fields['prenom'] ?? '')),
+        'societe' => trim((string) ($fields['societe'] ?? '')), // société du vendeur/partenaire (vide pour un client)
         'telephone' => trim((string) ($fields['telephone'] ?? '')),
         'adresse_numero' => trim((string) ($fields['adresse_numero'] ?? '')),
         'adresse_rue' => trim((string) ($fields['adresse_rue'] ?? '')),
         'code_postal' => trim((string) ($fields['code_postal'] ?? '')),
         'ville' => trim((string) ($fields['ville'] ?? '')),
         'reference_cadastrale' => trim((string) ($fields['reference_cadastrale'] ?? '')),
+        'role' => 'client', // client | vendeur | partenaire (les administrateurs sont dans admins.json)
+        'acces' => [],      // rubriques du back-office autorisées (vendeur/partenaire uniquement)
         'hash' => password_hash($password, PASSWORD_DEFAULT),
         'created' => date('Y-m-d'),
     ];
     $users[] = $user;
     return archicad_save_users($users) ? $user : false;
+}
+
+// ---------------------------------------------------------------------------
+// Rôles des comptes (data/users.json) : client, vendeur, partenaire.
+// Les administrateurs à part (data/admins.json) ont accès à tout.
+// ---------------------------------------------------------------------------
+
+// Rôles reconn.muni d'un accès potentiel au back-office (avec droits restreints)
+function archicad_bo_roles(): array
+{
+    return ['vendeur', 'partenaire'];
+}
+
+// Rôle effectif d'un compte : 'client' par défaut (rétro-compatibilité)
+function archicad_user_role(array $user): string
+{
+    $role = (string) ($user['role'] ?? 'client');
+    return in_array($role, ['client', 'vendeur', 'partenaire'], true) ? $role : 'client';
+}
+
+// Comptes ayant un rôle donné
+function archicad_users_by_role(string $role): array
+{
+    return array_values(array_filter(archicad_load_users(), function ($u) use ($role) {
+        return archicad_user_role($u) === $role;
+    }));
+}
+
+function archicad_users_count_role(string $role): int
+{
+    return count(archicad_users_by_role($role));
+}
+
+/**
+ * Crée un compte « staff » (vendeur ou partenaire) : mêmes champs qu'un client,
+ * plus le rôle et la liste des rubriques du back-office autorisées ($acces =
+ * tableau de clés, ex. ['index', 'soumissions', 'configurateur:murs']).
+ */
+function archicad_add_staff(array $fields, string $password, string $role, array $acces): array|false
+{
+    if (!in_array($role, archicad_bo_roles(), true)) {
+        return false;
+    }
+    $user = archicad_add_user($fields, $password);
+    if ($user === false) {
+        return false;
+    }
+    return archicad_update_staff((string) $user['id'], $fields, $role, $acces);
+}
+
+/**
+ * Met à jour un compte staff : profil (comme archicad_update_user) + rôle +
+ * accès. $acces : tableau de clés de rubriques cochées (vide = aucun accès BO).
+ */
+function archicad_update_staff(string $id, array $fields, string $role, array $acces): array|false
+{
+    if (!in_array($role, archicad_bo_roles(), true)) {
+        return false;
+    }
+    $user = archicad_update_user($id, $fields);
+    if ($user === false) {
+        return false;
+    }
+    $users = archicad_load_users();
+    foreach ($users as $i => $u) {
+        if (($u['id'] ?? '') === $id) {
+            $users[$i]['role'] = $role;
+            $users[$i]['acces'] = array_values(array_unique(array_map('strval', $acces)));
+            return archicad_save_users($users) ? $users[$i] : false;
+        }
+    }
+    return false;
+}
+
+/**
+ * Définit la zone géographique d'un compte staff : liste de codes
+ * départements attribués (ex. ['59', '62', '2A', '974']). Vide = aucune
+ * restriction (le compte voit tous les clients).
+ */
+function archicad_set_user_departements(string $id, array $departements): bool
+{
+    $users = archicad_load_users();
+    foreach ($users as $i => $u) {
+        if (($u['id'] ?? '') === $id) {
+            $users[$i]['departements'] = array_values(array_unique(array_map('strval', $departements)));
+            return archicad_save_users($users);
+        }
+    }
+    return false;
 }
 
 function archicad_delete_user(string $id): bool
@@ -132,7 +224,7 @@ function archicad_update_user(string $id, array $fields): array|false
     foreach ($users as $i => $user) {
         if (($user['id'] ?? '') === $id) {
             $users[$i]['email'] = $email;
-            foreach (['nom', 'prenom', 'telephone', 'adresse_numero', 'adresse_rue', 'code_postal', 'ville', 'reference_cadastrale'] as $f) {
+            foreach (['nom', 'prenom', 'societe', 'telephone', 'adresse_numero', 'adresse_rue', 'code_postal', 'ville', 'reference_cadastrale'] as $f) {
                 $users[$i][$f] = trim((string) ($fields[$f] ?? ''));
             }
             return archicad_save_users($users) ? $users[$i] : false;

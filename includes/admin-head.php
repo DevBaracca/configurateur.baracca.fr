@@ -1,8 +1,11 @@
 <?php
 // Attendu avant inclusion : $pageTitle (optionnel), $adminPage (section active)
 // Mise en page graphique du header/footer du blog (structure .header/.nav de style.css)
+require_once __DIR__ . '/acces.php';
 $adminPage = $adminPage ?? '';
-$adminLoggedIn = archicad_admin_is_logged_in();
+// Connecté au back-office : administrateur, vendeur ou partenaire
+$adminLoggedIn = archicad_bo_is_logged_in();
+$confHome = $adminLoggedIn ? archicad_bo_configurateur_home() : null;
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -24,11 +27,18 @@ $adminLoggedIn = archicad_admin_is_logged_in();
         </a>
         <?php if ($adminLoggedIn): ?>
           <ul class="nav-links">
-            <li><a href="index.php"<?= $adminPage === 'index' ? ' class="active"' : '' ?>>Tableau de bord</a></li>
-            <li><a href="utilisateurs.php"<?= $adminPage === 'utilisateurs' ? ' class="active"' : '' ?>>Utilisateurs</a></li>
-            <li><a href="soumissions.php"<?= $adminPage === 'soumissions' ? ' class="active"' : '' ?>>Soumissions</a></li>
-            <li><a href="configurateur.php"<?= $adminPage === 'configurateur' ? ' class="active"' : '' ?>>Configurateur</a></li>
-            <li><a href="administrateurs.php"<?= $adminPage === 'administrateurs' ? ' class="active"' : '' ?>>Administrateurs</a></li>
+            <?php if (archicad_bo_can('index')): ?>
+              <li><a href="index.php"<?= $adminPage === 'index' ? ' class="active"' : '' ?>>Tableau de bord</a></li>
+            <?php endif; ?>
+            <?php if (archicad_bo_can('soumissions')): ?>
+              <li><a href="soumissions.php"<?= $adminPage === 'soumissions' ? ' class="active"' : '' ?>>Soumissions</a></li>
+            <?php endif; ?>
+            <?php if ($confHome !== null): ?>
+              <li><a href="<?= htmlspecialchars($confHome) ?>"<?= $adminPage === 'configurateur' ? ' class="active"' : '' ?>>Configurateur</a></li>
+            <?php endif; ?>
+            <?php if (archicad_bo_can('comptes')): ?>
+              <li><a href="comptes.php"<?= $adminPage === 'comptes' ? ' class="active"' : '' ?>>Gestion des comptes</a></li>
+            <?php endif; ?>
           </ul>
         <?php else: ?>
           <ul class="nav-links">
@@ -61,11 +71,10 @@ $adminLoggedIn = archicad_admin_is_logged_in();
       <div class="mobile-menu hidden" id="mobile-menu">
         <ul>
           <?php if ($adminLoggedIn): ?>
-            <li><a href="index.php">Tableau de bord</a></li>
-            <li><a href="utilisateurs.php">Utilisateurs</a></li>
-            <li><a href="soumissions.php">Soumissions</a></li>
-            <li><a href="configurateur.php">Configurateur</a></li>
-            <li><a href="administrateurs.php">Administrateurs</a></li>
+            <?php if (archicad_bo_can('index')): ?><li><a href="index.php">Tableau de bord</a></li><?php endif; ?>
+            <?php if (archicad_bo_can('soumissions')): ?><li><a href="soumissions.php">Soumissions</a></li><?php endif; ?>
+            <?php if ($confHome !== null): ?><li><a href="<?= htmlspecialchars($confHome) ?>">Configurateur</a></li><?php endif; ?>
+            <?php if (archicad_bo_can('comptes')): ?><li><a href="comptes.php">Gestion des comptes</a></li><?php endif; ?>
             <li><a href="logout.php">Se déconnecter</a></li>
           <?php else: ?>
             <li><a href="../index.php">Accueil</a></li>

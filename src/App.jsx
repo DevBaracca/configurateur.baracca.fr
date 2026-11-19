@@ -221,17 +221,15 @@ export const plancherIdOf = (env, id, fallback) => revIdOf(plancherListOf(env), 
    la ligne directrice de la toiture part de la face EXTÉRIEURE des murs, donc
    la sous-face intérieure s'obtient sur le rectangle intérieur (ligne
    directrice - 2 épaisseurs de mur), projeté selon la pente du versant. */
-const toitAreaInt = (dmInt, p1, p2, tt, v, nbV) => {
+const toitAreaInt = (dmInt, p1, p2, tt, v, nbV, ep = 0) => {
   const c1 = Math.cos((p1 * Math.PI) / 180), c2 = Math.cos((p2 * Math.PI) / 180);
   if (tt === "terrasse") return (dmInt.longueur * dmInt.largeur) / nbV;
   if (tt === "deuxpentes") {
-    const t1 = Math.tan((p1 * Math.PI) / 180);
-    const hF = hauteurFaitageDm(dmInt, p1, p2, "deuxpentes");
-    const run1 = t1 > 0 ? Math.min(Math.max(hF / t1, 0), dmInt.largeur) : dmInt.largeur / 2;
+    const run1 = runFaitageDm(dmInt, p1, p2, "deuxpentes", ep);
     const run2 = dmInt.largeur - run1;
     return dmInt.longueur * (v === "nord" ? run1 / c1 : run2 / c2);
   }
-  if (tt === "quatrepentes") return surfaceToitureDm(dmInt, p1, p2, tt) / 4;
+  if (tt === "quatrepentes") return surfaceToitureDm(dmInt, p1, p2, tt, ep) / 4;
   return dmInt.longueur * (dmInt.largeur / c1); // monopente
 };
 
@@ -274,9 +272,7 @@ function pentsOf(d, env) {
       else if (toitType === "deuxpentes") {
         // faitage éventuellement décalé (pentes différentes) : chaque versant a sa
         // propre largeur horizontale run1 (nord) / run2 (sud), pas largeur/2
-        const t1 = Math.tan((pente1Of(d) * Math.PI) / 180);
-        const hF = hauteurFaitageDm(dm, pente1Of(d), pente2Of(d), "deuxpentes");
-        const run1 = t1 > 0 ? Math.min(Math.max(hF / t1, 0), dm.largeur) : dm.largeur / 2;
+        const run1 = runFaitageDm(dm, pente1Of(d), pente2Of(d), "deuxpentes", epToit);
         const run2 = dm.largeur - run1;
         areaBase = dm.longueur * (v === "nord" ? run1 / c1 : run2 / c2);
         area = areaBase + dm.longueur * dep * nbPigExt;
@@ -285,7 +281,7 @@ function pentsOf(d, env) {
       else { areaBase = dm.longueur * (dm.largeur / c1); area = areaBase + dm.longueur * dep * nbPigExt; } // monopente
       out.push({
         numero: n, instId: inst.id, instIndex: idx + 1, versant: v, area, areaBase,
-        areaBaseInt: toitAreaInt(dmInt, pente1Of(d), pente2Of(d), toitType, v, keys.length), // sous-face intérieure : - 2 épaisseurs de mur
+        areaBaseInt: toitAreaInt(dmInt, pente1Of(d), pente2Of(d), toitType, v, keys.length, epToit), // sous-face intérieure : - 2 épaisseurs de mur
         // couverture masquée pour ce module -> pas de revêtement de toiture créé
         surfaceId: visOfInst(d, env, inst).couverture ? couvIdOf(env, d.surfacesToiture?.[inst.id]?.[v], toiture?.couverture ?? toiture?.surface) : "",
         surfaceIntId: intIdOf(env, d.surfacesIntToiture?.[inst.id]?.[v], toiture?.interieur), // revêtement intérieur (sous-face)
@@ -390,16 +386,14 @@ export const pente1Of = (d) => +(d.pente ?? 15);
 
 /* Versions « dims » (chaque instance de module a son propre modèle, donc ses
    propres longueur/largeur/hauteur) — pentes globales (forme des réglages) */
-function surfaceToitureDm(dm, p1, p2, tt) {
+function surfaceToitureDm(dm, p1, p2, tt, ep = 0) {
   if (tt === "terrasse") return dm.longueur * dm.largeur;
   const c1 = Math.cos((p1 * Math.PI) / 180);
   if (tt === "deuxpentes") {
     // 2 versants, chacun selon sa propre pente ; faitage éventuellement décalé
     // (pentes différentes) : le versant nord fait run1, le sud largeur - run1
     const c2 = Math.cos((p2 * Math.PI) / 180);
-    const t1 = Math.tan((p1 * Math.PI) / 180), t2 = Math.tan((p2 * Math.PI) / 180);
-    const hF = hauteurFaitageDm(dm, p1, p2, "deuxpentes");
-    const run1 = t1 > 0 ? Math.min(Math.max(hF / t1, 0), dm.largeur) : dm.largeur / 2;
+    const run1 = runFaitageDm(dm, p1, p2, "deuxpentes", ep);
     const run2 = dm.largeur - run1;
     return dm.longueur * (run1 / c1 + run2 / c2);
   }
@@ -407,7 +401,17 @@ function surfaceToitureDm(dm, p1, p2, tt) {
   return dm.longueur * (dm.largeur / c1);
 }
 
-export function hauteurFaitageDm(dm, p1, p2, tt) {
+// Décalage vertical de la rive d'un versant de pente p (deux pentes asymétriques) :
+// δ = ep·(1/cos p − 1/cos p_min) — remonte le versant dont la sous-face du complexe
+// serait la plus basse, pour que les deux sous-faces rencontrent les murs intérieurs
+// AU MÊME NIVEAU. Nul si pentes égales (ou ep nul).
+export function deltaRiveDm(p1, p2, p, ep = 0) {
+  if (!ep) return 0;
+  const c = Math.cos((p * Math.PI) / 180);
+  const cM = Math.cos((Math.min(p1, p2) * Math.PI) / 180);
+  return ep * (1 / c - 1 / cM);
+}
+export function hauteurFaitageDm(dm, p1, p2, tt, ep = 0) {
   if (tt === "terrasse") return 0;
   const t1 = Math.tan((p1 * Math.PI) / 180);
   if (tt === "monopente") return t1 * dm.largeur;
@@ -416,7 +420,18 @@ export function hauteurFaitageDm(dm, p1, p2, tt) {
   const t2 = Math.tan((p2 * Math.PI) / 180);
   if (t1 <= 0) return dm.largeur * t2;
   if (t2 <= 0) return dm.largeur * t1;
-  return dm.largeur / (1 / t1 + 1 / t2);
+  // shed : les rives des deux versants sont remontées de δ1/δ2 (alignement des
+  // sous-faces en rive) ; le faîtage commun s'ajuste en conséquence
+  const d1 = deltaRiveDm(p1, p2, p1, ep), d2 = deltaRiveDm(p1, p2, p2, ep);
+  return (dm.largeur + d1 / t1 + d2 / t2) / (1 / t1 + 1 / t2);
+}
+// Run horizontal rive nord -> faîtage, avec le même décalage δ (faîtage décalé en shed)
+export function runFaitageDm(dm, p1, p2, tt, ep = 0) {
+  if (tt !== "deuxpentes") return dm.largeur / 2;
+  const t1 = Math.tan((p1 * Math.PI) / 180);
+  if (t1 <= 0) return dm.largeur / 2;
+  const hF = hauteurFaitageDm(dm, p1, p2, tt, ep);
+  return Math.min(Math.max((hF - deltaRiveDm(p1, p2, p1, ep)) / t1, 0), dm.largeur);
 }
 
 const surfaceToiture = (d, tt) =>
@@ -437,7 +452,8 @@ const volumeBrutInst = (d, env, dm) => {
   const box = dm.longueur * dm.largeur * dm.hauteur;
   const tt = toitTypeOf(d, env);
   if (tt === "terrasse") return box;
-  const hF = hauteurFaitageDm(dm, pente1Of(d), pente2Of(d), tt);
+  const epToit = +(toitureDefOf(d, env)?.epaisseur ?? 0.30);
+  const hF = hauteurFaitageDm(dm, pente1Of(d), pente2Of(d), tt, epToit);
   if (tt === "quatrepentes") return box + (dm.longueur * dm.largeur * hF) / 3;
   return box + (dm.longueur * (dm.largeur * hF)) / 2;
 };
@@ -540,7 +556,7 @@ function mursChiffrage(d, env) {
     if (!e.actif) return;
     if (!edgeMursVisible(d, env, e)) return; // murs non visibles des deux côtés : pas comptés
     const dm = dimsOf(d, env, e.inst); // dims du modèle de ce module
-    const hF = hauteurFaitageDm(dm, p1, p2, toitType);
+    const hF = hauteurFaitageDm(dm, p1, p2, toitType, epToit);
     const longueurExt = murLongueurDm(dm, e.face) + 2 * epMur; // épaisseurs aux 2 extrémités (EXTÉRIEUR)
     const longueurLD = murLongueurDm(dm, e.face);              // ligne directrice seule (INTÉRIEUR)
     let area = longueurExt * dm.hauteur;    // surface extérieure : mur + revêtement extérieur
@@ -1070,7 +1086,7 @@ function mergeConfig(saved) {
 
 /* Subdivisions cliquables d'un module sur le plan, pour sélectionner le pent
    de toiture à l'endroit du clic */
-function pentParts(d, inst, dimsOf, pents, toitType, x, y, L, l, epPx = 0) {
+function pentParts(d, inst, dimsOf, pents, toitType, x, y, L, l, epPx = 0, epToitV = 0) {
   const dm = dimsOf(inst);
   // Les pents couvrent aussi l'épaisseur des murs (comme la toiture réelle) :
   // pas de jour entre les pents de deux modules accolés, y compris en jonction en L
@@ -1078,9 +1094,7 @@ function pentParts(d, inst, dimsOf, pents, toitType, x, y, L, l, epPx = 0) {
   const cx = x + L / 2, cy = y + l / 2; // centre = centre de la ligne directrice
   const num = (v) => pents.find((p) => p.instId === inst.id && p.versant === v)?.numero ?? "?";
   if (toitType === "deuxpentes") {
-    const t1 = Math.tan((pente1Of(d) * Math.PI) / 180);
-    const hF = hauteurFaitageDm(dm, pente1Of(d), pente2Of(d), toitType);
-    const run1 = t1 > 0 ? Math.min(Math.max(hF / t1, 0), dm.largeur) : dm.largeur / 2;
+    const run1 = runFaitageDm(dm, pente1Of(d), pente2Of(d), toitType, epToitV);
     const yr = y + (run1 / dm.largeur) * l; // faitage (peut être décalé si asymétrique)
     return [
       { versant: "nord", numero: num("nord"), points: `${x0},${y0} ${x0 + W},${y0} ${x0 + W},${yr} ${x0},${yr}` },
@@ -1121,14 +1135,13 @@ const basPenteLongueur = (dm, toitType, versant) => {
 // rampant, sa projection horizontale vaut hauteur × cos(pente)
 const fenetreToitProfondeur = (d, toitType, versant, hauteur) =>
   +hauteur * Math.cos((penteOfPent(d, toitType, versant) * Math.PI) / 180);
-// Profondeur par défaut du cadre depuis la ligne directrice du bas de pente (px plan)
-const FENETRE_TOIT_DEP_PX = 20;
+// Décalage du cadre de fenêtre de toit depuis le bas de pente (px plan) :
+// 0 = à positionHauteur 0, la fenêtre est contre le bord intérieur du mur
+const FENETRE_TOIT_DEP_PX = 0;
 // Run horizontal (rive -> faîtage) du versant, en m
-const runOfVersant = (d, dm, toitType, versant) => {
+const runOfVersant = (d, dm, toitType, versant, ep = 0) => {
   if (toitType === "deuxpentes") {
-    const t1 = Math.tan((pente1Of(d) * Math.PI) / 180);
-    const hF = hauteurFaitageDm(dm, pente1Of(d), pente2Of(d), "deuxpentes");
-    const run1 = t1 > 0 ? Math.min(Math.max(hF / t1, 0), dm.largeur) : dm.largeur / 2;
+    const run1 = runFaitageDm(dm, pente1Of(d), pente2Of(d), "deuxpentes", ep);
     return versant === "sud" ? dm.largeur - run1 : run1;
   }
   if (toitType === "monopente") return dm.largeur;
@@ -1139,8 +1152,8 @@ const runOfVersant = (d, dm, toitType, versant) => {
   return 0;
 };
 // Longueur du rampant (rive -> faîtage) le long du versant, en m
-const rampantLongueur = (d, dm, toitType, versant) =>
-  runOfVersant(d, dm, toitType, versant)
+const rampantLongueur = (d, dm, toitType, versant, ep = 0) =>
+  runOfVersant(d, dm, toitType, versant, ep)
   / Math.max(Math.cos((penteOfPent(d, toitType, versant) * Math.PI) / 180), 1e-6);
 // Liste des fenêtres de toit d'un pent
 export const fenetresOfPent = (d, instId, versant) => d.fenetresToit?.[instId]?.[versant] || [];
@@ -1170,7 +1183,7 @@ function promoActive(d, env) {
 /* =================================================================
    Plan SVG (vue de dessus)
 ================================================================= */
-function Plan({ d, murs, charpente, toitType, selectedFace, planSel, selInst, cumul, dimsOf, pents, selPent, onSelectFace, onSelectPent, onAddSide, onRemoveInst, w, h, zoom }) {
+function Plan({ d, murs, charpente, toitType, selectedFace, planSel, selInst, cumul, dimsOf, pents, selPent, onSelectFace, onSelectPent, onAddSide, onRemoveInst, w, h, zoom, epToit = 0 }) {
   const W = w ?? 560, H = h ?? 400, margin = 64;
   const murDef = murs.find((m) => m.id === d.murType) || murs[0];
   // Modules placés côte à côte : positions absolues (x, y en mètres) ; chaque
@@ -1327,7 +1340,7 @@ function Plan({ d, murs, charpente, toitType, selectedFace, planSel, selInst, cu
       {/* pents de toiture cliquables : un clic affiche le pent cliqué dans la carte */}
       {onSelectPent && insts.filter((inst) => toitVisOf(visOf(inst))).map((inst) => {
         const x = X(inst.x), y = Y(inst.y), L = Lof(inst), l = lof(inst);
-        return pentParts(d, inst, dimsOf, pents, toitType, x, y, L, l, ep).map((pp) => (
+        return pentParts(d, inst, dimsOf, pents, toitType, x, y, L, l, ep, epToit).map((pp) => (
           <polygon key={pp.versant}
             points={pp.points}
             fill={planSel === "toiture" && selPent?.instId === inst.id && selPent?.versant === pp.versant ? "rgba(180,83,9,0.14)" : "transparent"}
@@ -1338,8 +1351,8 @@ function Plan({ d, murs, charpente, toitType, selectedFace, planSel, selInst, cu
           />
         ));
       })}
-      {/* fenêtres de toit : cadre en pointillé sur le pent, à 20 px du bas de
-          pente ; la profondeur du cadre est projetée selon la pente (hauteur × cos) */}
+      {/* fenêtres de toit : cadre en pointillé sur le pent, au droit du bas de pente
+          (positionHauteur 0 = contre le mur) ; profondeur projetée selon la pente (hauteur × cos) */}
       {insts.filter((inst) => toitVisOf(visOf(inst))).map((inst) => {
         const x = X(inst.x), y = Y(inst.y), L = Lof(inst), l = lof(inst);
         return Object.entries(d.fenetresToit?.[inst.id] || {}).flatMap(([versant, list]) =>
@@ -1347,7 +1360,7 @@ function Plan({ d, murs, charpente, toitType, selectedFace, planSel, selInst, cu
             const edge = basPenteOf(toitType, versant);
             const hProj = fenetreToitProfondeur(d, toitType, versant, f.hauteur) * scale; // profondeur projetée (px)
             const wPx = f.largeur * scale;
-            const dep = FENETRE_TOIT_DEP_PX; // 20 px depuis le bas de pente
+            const dep = FENETRE_TOIT_DEP_PX; // 0 px : à positionHauteur 0, contre le mur
             // hauteur sur le versant : projection en plan = positionHauteur × cos(pente)
             const phPx = (f.positionHauteur ?? 0) * Math.cos((penteOfPent(d, toitType, versant) * Math.PI) / 180) * scale;
             let rx, ry, rw, rh;
@@ -1367,9 +1380,7 @@ function Plan({ d, murs, charpente, toitType, selectedFace, planSel, selInst, cu
       {insts.filter((inst) => toitVisOf(visOf(inst))).map((inst) => {
         const dm = dimsOf(inst);
         if (toitType === "deuxpentes") {
-          const t1 = Math.tan((pente1Of(d) * Math.PI) / 180);
-          const hFm = hauteurFaitageDm(dm, pente1Of(d), pente2Of(d), toitType);
-          const run1 = t1 > 0 ? Math.min(Math.max(hFm / t1, 0), dm.largeur) : dm.largeur / 2;
+          const run1 = runFaitageDm(dm, pente1Of(d), pente2Of(d), toitType, epToit);
           const yRidge = Y(inst.y) + run1 * scale;
           return (
             // faîtage prolongé de l'épaisseur des murs : les faîtages de deux modules
@@ -1505,7 +1516,7 @@ function Elevation({ d, murs, planchers, surfaces, chants, interieurs, couvertur
   const epP = epaisseurPlancher(d, planchers);
   const epToit = +(toiture.epaisseur ?? 0.30);   // épaisseur de la toiture (m)
   const toitRgb = toiture.rgb || [120, 113, 108];
-  const hFmax = Math.max(...segs.map((x) => hauteurFaitageDm(x.dm, pente1Of(d), pente2Of(d), toitType)));
+  const hFmax = Math.max(...segs.map((x) => hauteurFaitageDm(x.dm, pente1Of(d), pente2Of(d), toitType, epToit)));
   // Échelle UNIQUE en horizontal et en vertical, sur toute la façade (les
   // proportions sont conservées), en réservant la place de la toiture, du
   // plancher et du sol. Ligne directrice des murs à l'intérieur : la façade
@@ -1530,7 +1541,6 @@ function Elevation({ d, murs, planchers, surfaces, chants, interieurs, couvertur
   const x0 = (W - L) / 2;
   const ySol = H - margin;                                     // trait du sol
   const yPlancher = ySol - SOL_SOUS_PLANCHER * scale - epPxP;  // ligne directrice du plancher = bas des murs
-  const nom = FACES.find((f) => f.key === faceKey).label;
   // Vue extérieure : miroir vu du NORD et de l'EST (l'ordre des segments est
   // déjà inversé côté App). Pas de miroir pour sud et ouest.
   const miroir = faceKey === "nord" || faceKey === "est";
@@ -1570,6 +1580,10 @@ function Elevation({ d, murs, planchers, surfaces, chants, interieurs, couvertur
     // empreinte du complexe de toiture = LIGNE DIRECTRICE seule (x0s..x0s+Ls),
     // comme en 3D : pas de débord, pas jusqu'aux faces extérieures des murs
     const caS = x0s, cbS = x0s + Ls;
+    // débord en bas de pente (vue de côté nord/sud) : la rive du toit descend selon la
+    // pente au-delà du mur — de (épaisseur du mur + débord) × tan(pente) sous yTop
+    const pVue = !horiz ? 0 : toitType === "monopente" ? pente1Of(d) : (faceKey === "nord" ? pente1Of(d) : pente2Of(d));
+    const yRive = yTop + (murDef.epaisseur + (depM ?? epToit)) * Math.tan((pVue * Math.PI) / 180) * scale;
     const hexCouv = couvHex ?? rgbHex(toitRgb);   // couleur du revêtement de couverture (back-office)
     const epC = epCouvPx ?? Math.max(1.5, epToitReelPx * 0.25); // épaisseur de la couverture en px
     const fillToit = mixHex(hexCouv, "#ffffff", 0.55);  // bande couverture (teintée couleur du revêtement de toiture)
@@ -1587,31 +1601,34 @@ function Elevation({ d, murs, planchers, surfaces, chants, interieurs, couvertur
       // façade nord = pignon haut : le mur monte jusqu'au toit, la toiture n'est
       // vue que de chant (trait du haut) ; façade sud = versant vu de face (bande)
       if (horiz && faceKey === "nord") return { path: `M ${xaS} ${yTop - hF} L ${xbS} ${yTop - hF}`, fill: "none", dash: null, cote: false, bande: bandeHoriz(yTop - hF) };
-      if (horiz) return { path: `M ${xaS} ${yTop} L ${xaS} ${yTop - hF} L ${xbS} ${yTop - hF} L ${xbS} ${yTop} Z`, fill: fillToit, dash: null, cote: true, bande: bandeHoriz(yTop) };
+      if (horiz) return { path: `M ${xaS} ${yRive} L ${xaS} ${yTop - hF} L ${xbS} ${yTop - hF} L ${xbS} ${yRive} Z`, fill: fillToit, dash: null, cote: true, bande: bandeHoriz(yTop) };
       // est/ouest (pignon monopente) : contour avec débord le long de la pente
       const [mx0, my0, mx1, my1] = prolonge(...(faceKey === "ouest" ? [xaS, yTop - hF, xbS, yTop] : [xaS, yTop, xbS, yTop - hF]), debG ? debP : 0, debD ? debP : 0);
       // bande complexe sur la même droite que le contour, limitée à la ligne directrice
       const [ax, ay, bx, by] = faceKey === "ouest" ? [xaS, yTop - hF, xbS, yTop] : [xaS, yTop, xbS, yTop - hF];
       const yL = yAt(caS, ax, ay, bx, by), yR = yAt(cbS, ax, ay, bx, by);
+      // épaisseur mesurée selon la NORMALE du versant : en vertical, e / cos(pente)
+      const dxB = cbS - caS;
+      const cosM = Math.max(1e-6, dxB / Math.hypot(dxB, hF || 1e-6));
+      const eV = epToitReelPx / cosM, eCV = epC / cosM;
       return {
         path: `M ${mx0} ${my0} L ${mx1} ${my1}`, fill: "none", dash: null, cote: false, pignon: true,
         apexX: faceKey === "ouest" ? x0s - epPx : x0s + Ls + epPx,
         bande: {
-          path: `M ${caS} ${yL} L ${cbS} ${yR} L ${cbS} ${yR + epToitReelPx} L ${caS} ${yL + epToitReelPx} Z`, fill: fillCplx,
-          couv: { path: `M ${caS} ${yL} L ${cbS} ${yR} L ${cbS} ${yR + epC} L ${caS} ${yL + epC} Z`, fill: fillToit },
+          path: `M ${caS} ${yL} L ${cbS} ${yR} L ${cbS} ${yR + eV} L ${caS} ${yL + eV} Z`, fill: fillCplx,
+          couv: { path: `M ${caS} ${yL} L ${cbS} ${yR} L ${cbS} ${yR + eCV} L ${caS} ${yL + eCV} Z`, fill: fillToit },
         },
       };
     }
     if (horiz && toitType === "quatrepentes") {
       const rx1 = x0s + (dm.largeur / 2) * scale, rx2 = x0s + Ls - (dm.largeur / 2) * scale;
-      return { path: `M ${xaS} ${yTop} L ${rx1} ${yTop - hF} L ${rx2} ${yTop - hF} L ${xbS} ${yTop} Z`, fill: fillToit, dash: null, cote: false, bande: bandeHoriz(yTop) };
+      return { path: `M ${xaS} ${yRive} L ${rx1} ${yTop - hF} L ${rx2} ${yTop - hF} L ${xbS} ${yRive} Z`, fill: fillToit, dash: null, cote: false, bande: bandeHoriz(yTop) };
     }
-    if (horiz) return { path: `M ${xaS} ${yTop} L ${xaS} ${yTop - hF} L ${xbS} ${yTop - hF} L ${xbS} ${yTop} Z`, fill: fillToit, dash: null, cote: true, bande: bandeHoriz(yTop) };
+    if (horiz) return { path: `M ${xaS} ${yRive} L ${xaS} ${yTop - hF} L ${xbS} ${yTop - hF} L ${xbS} ${yRive} Z`, fill: fillToit, dash: null, cote: true, bande: bandeHoriz(yTop) };
     // est/ouest, deux pentes ou croupe (vue de pignon) : le mur monte jusqu'au
     // faitage, la couverture n'est dessinée qu'en contour
-    const t1 = Math.tan((pente1Of(d) * Math.PI) / 180);
-    const hFm = hauteurFaitageDm(dm, pente1Of(d), pente2Of(d), toitType);
-    const run1 = t1 > 0 ? Math.min(Math.max(hFm / t1, 0), dm.largeur) : dm.largeur / 2;
+    const hFm = hauteurFaitageDm(dm, pente1Of(d), pente2Of(d), toitType, epToit);
+    const run1 = runFaitageDm(dm, pente1Of(d), pente2Of(d), toitType, epToit);
     const apexX = miroir ? x0s + Ls - run1 * scale : x0s + run1 * scale;
     // débord du toit en suivant la pente : chaque versant est prolongé de debP
     // au-delà du mur, depuis la ligne directrice (sans débord en x)
@@ -1621,11 +1638,24 @@ function Elevation({ d, murs, planchers, surfaces, chants, interieurs, couvertur
     // ligne directrice (caS..cbS) : le complexe n'a PAS de débord
     const yL = yAt(caS, xaS, yTop, apexX, yTop - hF);
     const yR = yAt(cbS, apexX, yTop - hF, xbS, yTop);
+    // Sous-face PARALLÈLE à chaque versant (comme en 3D : décalage selon la normale,
+    // épaisseur réelle constante). En vertical, le décalage vaut e / cos(pente) =
+    // e·sqrt(1+m²). Pentes différentes (shed) => faitage décalé ; les deux sous-faces
+    // parallèles se rejoignent au vrai point de faîtage (intersection des deux droites),
+    // et non verticalement sous l'arête supérieure.
+    const dxL = apexX - xaS, dxR = xbS - apexX;
+    const m1 = hF / Math.max(dxL, 1e-6), m2 = hF / Math.max(dxR, 1e-6); // pentes dessinées (px/px)
+    const eCplxL = epToitReelPx * Math.sqrt(1 + m1 * m1), eCplxR = epToitReelPx * Math.sqrt(1 + m2 * m2);
+    const eCouvL = epC * Math.sqrt(1 + m1 * m1), eCouvR = epC * Math.sqrt(1 + m2 * m2);
+    const u = (eCplxL - eCplxR) / (m1 + m2 + 1e-9);             // intersection des sous-faces au faîtage
+    const apexBotX = apexX + u, apexBotY = yTop - hF - m1 * u + eCplxL;
+    const uC = (eCouvL - eCouvR) / (m1 + m2 + 1e-9);
+    const apexBotCX = apexX + uC, apexBotCY = yTop - hF - m1 * uC + eCouvL;
     return {
       path: `M ${px0} ${py0} L ${apexX} ${yTop - hF} L ${px1} ${py1}`, fill: "none", dash: null, cote: false, pignon: true, apexX,
       bande: {
-        path: `M ${caS} ${yL} L ${apexX} ${yTop - hF} L ${cbS} ${yR} L ${cbS} ${yR + epToitReelPx} L ${apexX} ${yTop - hF + epToitReelPx} L ${caS} ${yL + epToitReelPx} Z`, fill: fillCplx,
-        couv: { path: `M ${caS} ${yL} L ${apexX} ${yTop - hF} L ${cbS} ${yR} L ${cbS} ${yR + epC} L ${apexX} ${yTop - hF + epC} L ${caS} ${yL + epC} Z`, fill: fillToit },
+        path: `M ${caS} ${yL} L ${apexX} ${yTop - hF} L ${cbS} ${yR} L ${cbS} ${yR + eCplxR} L ${apexBotX} ${apexBotY} L ${caS} ${yL + eCplxL} Z`, fill: fillCplx,
+        couv: { path: `M ${caS} ${yL} L ${apexX} ${yTop - hF} L ${cbS} ${yR} L ${cbS} ${yR + eCouvR} L ${apexBotCX} ${apexBotCY} L ${caS} ${yL + eCouvL} Z`, fill: fillToit },
       },
     };
   };
@@ -1636,7 +1666,7 @@ function Elevation({ d, murs, planchers, surfaces, chants, interieurs, couvertur
     const pos = horiz ? (s.inst?.x ?? 0) : (s.inst?.y ?? 0);
     const lenM = horiz ? s.dm.longueur : s.dm.largeur;
     const hM = s.dm.hauteur * scale;
-    const hF = hauteurFaitageDm(s.dm, pente1Of(d), pente2Of(d), toitType) * scale;
+    const hF = hauteurFaitageDm(s.dm, pente1Of(d), pente2Of(d), toitType, epToit) * scale;
     let x0s = x0 + (pos - axisMin) * scale;
     if (miroir) x0s = x0 + (Lm - (pos - axisMin) - lenM) * scale;
     const Ls = lenM * scale;
@@ -1717,6 +1747,23 @@ function Elevation({ d, murs, planchers, surfaces, chants, interieurs, couvertur
       postByX.set(k, post);
     }
   });
+  // repères graphiques de la façade : faitage (point le plus haut), bas du plancher, cotes
+  let ySommet = yPlancher - hMax * scale - epToitReelPx - hFmax * scale;
+  let xFaitage = x0 + L / 2;
+  placed.forEach((s) => {
+    if (s.traversant || s.toitVisible === false) return;
+    const yS = s.yToit - s.hF;
+    if (yS < ySommet) { ySommet = yS; xFaitage = s.toit.apexX ?? xFaitage; }
+  });
+  const yBasP = yPlancher + epPxP;                       // bas du plancher
+  const hSolCm = fmtCm((ySol - ySommet) / scale);        // hauteur depuis le sol (20 cm sous le plancher inclus)
+  const hEnsCm = fmtCm((yBasP - ySommet) / scale);       // hauteur du faitage au bas du plancher
+  const yCoteH = ySommet - 30;                           // cote de largeur, au-dessus de la flèche
+  const xC = Math.min(xb + 18, W - 26);                  // cote de hauteur, à droite
+  const debLat = horiz ? (depM ?? epToit) : 0;            // débord latéral de toiture (m) — vue de côté seulement
+  const xCoteMin = xa - debLat * scale;                  // cote horizontale = largeur totale (murs + débords de toiture)
+  const xCoteMax = xb + debLat * scale;
+  const largeurTotaleM = (xCoteMax - xCoteMin) / scale;
   return (
     <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ width: "100%", height: "100%" }}>
       <defs>
@@ -1771,7 +1818,7 @@ function Elevation({ d, murs, planchers, surfaces, chants, interieurs, couvertur
               )}
               {/* vue de pignon : zone SOUS le contour de toit — sert à couper les hauts
                   de charpente (sablières, poteaux) qui dépasseraient de la ligne de toit */}
-              {seg.toit.pignon && toitVisOf(seg.vis) && seg.toitVisible !== false && (
+              {seg.toit.pignon && toitVisOf(seg.vis) && (
                 <clipPath id={`toitCut-${i}`}>
                   <path d={`M ${seg.x0s - epPx} ${seg.yToit} L ${seg.toit.apexX} ${seg.yToit - seg.hF} L ${seg.x0s + seg.Ls + epPx} ${seg.yToit} L ${seg.x0s + seg.Ls + epPx} ${H} L ${seg.x0s - epPx} ${H} Z`} />
                 </clipPath>
@@ -1829,21 +1876,23 @@ function Elevation({ d, murs, planchers, surfaces, chants, interieurs, couvertur
                 (perpendiculaires) apparaissent derrière les poteaux, en couleur par défaut
                 du mur (back-office) — dessinés avant les poteaux */}
             {seg.toit.pignon && seg.face?.actif === false && (() => {
-              // chants nord/sud derrière la charpente : montent jusqu'au faîte puis sont
-              // coupés par la pente de toit (toitCut), comme sur la 3D.
+              // chants nord/sud derrière la charpente : ils montent mais sont COUPÉS
+              // par la pente de toit (toitCut, toujours défini quand le toit est visible)
+              // — le haut du mur suit la toiture sans jamais dépasser au-dessus.
               // En vue miroir (nord/est) l'axe est inversé : le chant à gauche (x0s) est
               // le mur sud, celui à droite (x0s+Ls) est le mur nord.
               const left = miroir ? seg.inst?.murs?.sud : seg.inst?.murs?.nord;
               const right = miroir ? seg.inst?.murs?.nord : seg.inst?.murs?.sud;
-              const clip = toitVisOf(vis) && seg.toitVisible !== false ? `url(#toitCut-${i})` : undefined;
+              const clip = toitVisOf(vis) ? `url(#toitCut-${i})` : undefined;
+              const yHaut = clip ? seg.yToit - seg.hF - 10 : seg.yToit; // sans toit : arrêt au haut du mur
               return (
                 <>
                   {left?.actif !== false && (
-                    <rect x={seg.x0s - epPx} y={seg.yToit - seg.hF - 10} width={epPx} height={yPlancher - seg.yToit + seg.hF + 10}
+                    <rect x={seg.x0s - epPx} y={yHaut} width={epPx} height={yPlancher - yHaut}
                       fill={rgbHex(murDef.rgb)} stroke="#78716c" clipPath={clip} />
                   )}
                   {right?.actif !== false && (
-                    <rect x={seg.x0s + seg.Ls} y={seg.yToit - seg.hF - 10} width={epPx} height={yPlancher - seg.yToit + seg.hF + 10}
+                    <rect x={seg.x0s + seg.Ls} y={yHaut} width={epPx} height={yPlancher - yHaut}
                       fill={rgbHex(murDef.rgb)} stroke="#78716c" clipPath={clip} />
                   )}
                 </>
@@ -1906,7 +1955,7 @@ function Elevation({ d, murs, planchers, surfaces, chants, interieurs, couvertur
               // vue est/ouest) ; en pignon elle est coupée par la ligne de toit
               const epC = Math.max(4, (charpente?.epaisseur ?? 0.20) * scale);
               const col = charpente?.image ? "url(#charpPatE)" : mixHex(rgbHex(charpente?.rgb || [140, 107, 89]), "#ffffff", 0.6 * t); // visuel charpente si renseigné, sinon couleur (grisée selon la profondeur)
-              const cut = seg.toit.pignon && seg.toitVisible !== false ? `url(#toitCut-${i})` : undefined;
+              const cut = seg.toit.pignon && toitVisOf(seg.vis) ? `url(#toitCut-${i})` : undefined;
               return (
                 <g clipPath={cut}>
                   {/* sablière dans l'axe des poteaux (±offPx de la ligne directrice, idem 3D),
@@ -1956,15 +2005,14 @@ function Elevation({ d, murs, planchers, surfaces, chants, interieurs, couvertur
               const fens = fenetresOfPent(d, seg.inst?.id ?? "m0", versant);
               if (!fens.length) return null;
               const p = penteOfPent(d, toitType, versant);
-              const tanP = Math.tan((p * Math.PI) / 180);
               const sinP = Math.sin((p * Math.PI) / 180);
-              const dWin = 0.20;
+              const dWin = 0; // à positionHauteur 0, la fenêtre est contre le mur
               return fens.map((f, j) => {
                 const x = ox(f, seg);
                 const wPx = f.largeur * scale;
                 const hVert = Math.max(6, f.hauteur * sinP * scale);
                 // hauteur sur le versant : le bas de la fenêtre monte de positionHauteur le long du rampant
-                const yLow = seg.yToit - (dWin + (f.positionHauteur ?? 0)) * tanP * scale;
+                const yLow = seg.yToit - (dWin + (f.positionHauteur ?? 0)) * sinP * scale;
                 return (
                   <rect key={j} x={x} y={yLow - hVert} width={wPx} height={hVert}
                     fill="#ffffff" stroke="#2563eb" strokeWidth="1.5" rx="1"
@@ -1975,11 +2023,25 @@ function Elevation({ d, murs, planchers, surfaces, chants, interieurs, couvertur
           </g>
         );
       })}
-      <text x={x0 + L / 2} y={yPlancher - hMax * scale - hFmax * scale - 12} textAnchor="middle" fill="#78716c" fontSize="11">
-        {toitType === "terrasse"
-          ? `${nom} — terrasse plate (${segs.length} module${segs.length > 1 ? "s" : ""})`
-          : `${nom} — ${placed.some((s) => s.toit.cote) ? "toiture vue de côté" : toitType === "deuxpentes" ? "pignon" : "croupe"}, faitage +${fmtCm(hFmax)} cm (${segs.length} module${segs.length > 1 ? "s" : ""})`}
-      </text>
+      {/* flèche pleine noire pointant le faitage + hauteur depuis le sol (20 cm sous le plancher inclus) */}
+      <polygon points={`${xFaitage - 5},${ySommet - 16} ${xFaitage + 5},${ySommet - 16} ${xFaitage},${ySommet - 5}`} fill="#1c1917" />
+      <text x={xFaitage + 10} y={ySommet - 9} textAnchor="start" fill="#1c1917" fontSize="11" fontWeight="600">{hSolCm} cm</text>
+      {/* cote horizontale : largeur totale avec les débords de toiture, au-dessus de la flèche */}
+      <line x1={xCoteMin} y1={yCoteH} x2={xCoteMax} y2={yCoteH} stroke="#a8a29e" strokeDasharray="4 3" />
+      <line x1={xCoteMin} y1={yCoteH - 5} x2={xCoteMin} y2={yCoteH + 5} stroke="#a8a29e" />
+      <line x1={xCoteMax} y1={yCoteH - 5} x2={xCoteMax} y2={yCoteH + 5} stroke="#a8a29e" />
+      <text x={(xCoteMin + xCoteMax) / 2} y={yCoteH - 6} textAnchor="middle" fill="#78716c" fontSize="10">{fmtCm(largeurTotaleM)} cm</text>
+      {/* cote verticale à droite : du faitage au bas du plancher */}
+      <line x1={xC} y1={ySommet} x2={xC} y2={yBasP} stroke="#a8a29e" strokeDasharray="4 3" />
+      <line x1={xC - 5} y1={ySommet} x2={xC + 5} y2={ySommet} stroke="#a8a29e" />
+      <line x1={xC - 5} y1={yBasP} x2={xC + 5} y2={yBasP} stroke="#a8a29e" />
+      <text x={xC + 11} y={(ySommet + yBasP) / 2} textAnchor="middle" fill="#78716c" fontSize="10"
+        transform={`rotate(-90 ${xC + 11} ${(ySommet + yBasP) / 2})`}>{hEnsCm} cm</text>
+      {/* sol plein : hachures fines à 45° sous le trait de sol */}
+      {Array.from({ length: Math.max(0, Math.floor((W - 34) / 8)) }, (_, i) => {
+        const xh = 26 + i * 8;
+        return <line key={i} x1={xh} y1={ySol} x2={xh - 6} y2={ySol + 6} stroke="#a8a29e" strokeWidth="1" />;
+      })}
     </svg>
   );
 }
@@ -2127,7 +2189,7 @@ export default function App() {
   const [panels, setPanels] = useState({
     plan: { x: 10, y: 0, w: 5000, h: 420 },
     elev: { x: 10, y: 580, w: 5000, h: 340 },
-    vue3d: { x: 10, y: 1080, w: 5000, h: 380 },
+    vue3d: { x: 10, y: 1080, w: 5000, h: 570 },
   });
   const [zoom, setZoom] = useState(1); // zoom du plan (boutons + / −)
   const [stageH, setStageH] = useState(900);
@@ -2575,7 +2637,7 @@ export default function App() {
       ouvertures: [
         ...face.ouvertures,
         { menuiserieId: def?.id ?? null, type: def?.type || "baie", largeur, hauteur, position,
-          allege: def?.type === "porte" ? 0 : (def?.type === "fenetre" ? 0.9 : 0) },
+          allege: 0 },
       ],
     });
     setAddOpen(false);
@@ -2597,6 +2659,13 @@ export default function App() {
     const next = Math.round((o.position + dir * POSITION_STEP) * 1000) / 1000;
     updateOuverture(i, { position: Math.min(Math.max(next, POSITION_MIN), positionMax(o)) });
   };
+  /* Monte/descend l'allège par pas de 10 cm, borné entre 0 et le haut du mur moins la hauteur de l'ouvrant */
+  const stepAllege = (i, dir) => {
+    const o = face.ouvertures[i];
+    const max = Math.max(0, dmSel.hauteur - o.hauteur);
+    const next = Math.round(((o.allege ?? 0) + dir * 0.10) * 100) / 100;
+    updateOuverture(i, { allege: Math.min(Math.max(next, 0), max) });
+  };
   const removeOuverture = (i) =>
     setFace(selectedFace, { ouvertures: face.ouvertures.filter((_, j) => j !== i) });
 
@@ -2607,7 +2676,7 @@ export default function App() {
   const pentSel = selPent ? pentsAll.find((pp) => pp.instId === selPent.instId && pp.versant === selPent.versant) : null;
   const fenetresPent = pentSel ? fenetresOfPent(d, pentSel.instId, pentSel.versant) : [];
   const basPenteLen = pentSel ? basPenteLongueur(dimsOf(d, env, instOf(d, pentSel.instId)), toitType, pentSel.versant) : 0;
-  const rampantLen = pentSel ? rampantLongueur(d, dimsOf(d, env, instOf(d, pentSel.instId)), toitType, pentSel.versant) : 0;
+  const rampantLen = pentSel ? rampantLongueur(d, dimsOf(d, env, instOf(d, pentSel.instId)), toitType, pentSel.versant, +(toitureDefOf(d, env)?.epaisseur ?? 0.30)) : 0;
   const setFenetres = (list) => {
     if (!pentSel) return;
     setD((prev) => ({
@@ -2656,6 +2725,13 @@ export default function App() {
     const f = fenetresPent[i];
     const next = Math.round((f.position + dir * POSITION_STEP) * 1000) / 1000;
     updateFen(i, { position: Math.min(Math.max(next, POSITION_MIN), fenPositionMax(f)) });
+  };
+  /* Monte/descend la fenêtre sur le versant par pas de 10 cm, borné entre 0 et le rampant moins la hauteur */
+  const stepHauteurFen = (i, dir) => {
+    const f = fenetresPent[i];
+    const max = Math.max(0, rampantLen - f.hauteur);
+    const next = Math.round(((f.positionHauteur ?? 0) + dir * 0.10) * 100) / 100;
+    updateFen(i, { positionHauteur: Math.min(Math.max(next, 0), max) });
   };
   const removeFen = (i) => setFenetres(fenetresPent.filter((_, j) => j !== i));
 
@@ -3199,6 +3275,7 @@ export default function App() {
           </div>
           <div className="panel-canvas" style={{ height: panels.plan.h }} ref={(el) => { planSvgRef.current = el ? el.querySelector("svg") : null; }}>
             <Plan d={d} murs={env.murs} charpente={charpenteSel} toitType={toitType} selectedFace={selectedFace} planSel={planSel} selInst={d.selInst}
+            epToit={+(toitureDefOf(d, env)?.epaisseur ?? 0.30)}
             w={effW("plan")} h={panels.plan.h} zoom={zoom}
             cumul={{ longueur: spanXm(d, env), largeur: spanYm(d, env), plancher: surfacePlancher(d, env) }}
             dimsOf={dimsOfInst}
@@ -3557,7 +3634,7 @@ export default function App() {
                   <div className="ouverture-main">
                     <div className="menuiserie-row">
                       <div className="fields-grid" style={{ flex: 1 }}>
-                        <Field label="Ouvrant (catalogue)">
+                        <div className="field">
                           <select value={addMenuiserieId} onChange={(e) => setAddMenuiserieId(e.target.value)}>
                             {env.menuiseries?.map((x) => (
                               <option key={x.id} value={x.id}>
@@ -3565,7 +3642,7 @@ export default function App() {
                               </option>
                             ))}
                           </select>
-                        </Field>
+                        </div>
                       </div>
                     </div>
                     <button type="button" className="btn primary small" onClick={validerAjout}>Valider</button>
@@ -3585,7 +3662,7 @@ export default function App() {
               )}
               {face.actif ? (
                 <div>
-                  {face.ouvertures.map((o, i) => {
+                  {face.ouvertures.map((o, i) => ({ o, i })).reverse().map(({ o, i }) => {
                     const m = env.menuiseries?.find((x) => x.id === o.menuiserieId);
                     return (
                     <div key={i} className="ouverture">
@@ -3594,16 +3671,16 @@ export default function App() {
                         {m?.image && <img src={m.image} alt={m.nom} className="menuiserie-thumb" />}
                         <div className="fields-grid" style={{ flex: 1 }}>
                           {env.menuiseries ? (
-                            <Field label="Menuiserie (catalogue)">
+                            <div className="field">
                               <select value={o.menuiserieId || ""} onChange={(e) => pickMenuiserie(i, e.target.value)}>
-                                <option value="">Ouverture sur mesure…</option>
                                 {env.menuiseries.map((x) => (
                                   <option key={x.id} value={x.id}>
                                     {x.nom} — {fmtCm(x.largeur)} × {fmtCm(x.hauteur)} cm{+x.tarif > 0 ? ` — ${fmtEur(x.tarif)} HT` : ""}
                                   </option>
                                 ))}
                               </select>
-                            </Field>
+                              <span className="field-note">Allège : {fmtCm(o.allege ?? 0)} cm</span>
+                            </div>
                           ) : (
                             <Field label="Type">
                               <select value={o.type} onChange={(e) => updateOuverture(i, { type: e.target.value })}>
@@ -3613,36 +3690,33 @@ export default function App() {
                               </select>
                             </Field>
                           )}
-                          {(!env.menuiseries || !o.menuiserieId) && (
-                            <>
-                              <Field label="Largeur (cm)">
-                                <input type="number" step="0.1" value={Math.round(o.largeur * 1000) / 10}
-                                  onChange={(e) => updateOuverture(i, { largeur: Math.round((+e.target.value || 0) * 10) / 1000 })} />
-                              </Field>
-                              <Field label="Hauteur (cm)">
-                                <input type="number" step="0.1" value={Math.round(o.hauteur * 1000) / 10}
-                                  onChange={(e) => updateOuverture(i, { hauteur: Math.round((+e.target.value || 0) * 10) / 1000 })} />
-                              </Field>
-                            </>
-                          )}
-                          <Field label="Allège (cm)">
-                            <input type="number" step="0.1" min="0" value={Math.round((o.allege ?? 0) * 1000) / 10}
-                              onChange={(e) => updateOuverture(i, { allege: Math.min(Math.max(Math.round((+e.target.value || 0) * 10) / 1000, 0), Math.max(0, dmSel.hauteur - o.hauteur)) })} />
-                          </Field>
-                          <Field label="position sur le mur">
-                            <div className="stepper">
-                              <button type="button" className="btn small step-arrow"
-                                disabled={o.position - POSITION_STEP < POSITION_MIN - 1e-9}
-                                onClick={() => stepPosition(i, -1)} title="Déplacer vers la gauche" aria-label="Déplacer vers la gauche">
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5m0 0l6-6m-6 6l6 6"/></svg>
-                              </button>
-                              <button type="button" className="btn small step-arrow"
-                                disabled={o.position + POSITION_STEP > positionMax(o) + 1e-9}
-                                onClick={() => stepPosition(i, 1)} title="Déplacer vers la droite" aria-label="Déplacer vers la droite">
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14m0 0l-6-6m6 6l-6 6"/></svg>
-                              </button>
-                            </div>
-                          </Field>
+                          <div className="step-cross" title="Position sur le mur (gauche / droite) et allège (haut / bas), par pas de 10 cm">
+                            <span />
+                            <button type="button" className="btn small step-arrow"
+                              disabled={(o.allege ?? 0) + 0.10 > Math.max(0, dmSel.hauteur - o.hauteur) + 1e-9}
+                              onClick={() => stepAllege(i, 1)} title="Monter l'ouvrant de 10 cm" aria-label="Monter l'ouvrant de 10 cm">
+                              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5m0 0l-6 6m6-6l6 6"/></svg>
+                            </button>
+                            <span />
+                            <button type="button" className="btn small step-arrow"
+                              disabled={o.position - POSITION_STEP < POSITION_MIN - 1e-9}
+                              onClick={() => stepPosition(i, -1)} title="Déplacer vers la gauche" aria-label="Déplacer vers la gauche">
+                              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5m0 0l6-6m-6 6l6 6"/></svg>
+                            </button>
+                            <span className="step-cross-dot" />
+                            <button type="button" className="btn small step-arrow"
+                              disabled={o.position + POSITION_STEP > positionMax(o) + 1e-9}
+                              onClick={() => stepPosition(i, 1)} title="Déplacer vers la droite" aria-label="Déplacer vers la droite">
+                              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14m0 0l-6-6m6 6l-6 6"/></svg>
+                            </button>
+                            <span />
+                            <button type="button" className="btn small step-arrow"
+                              disabled={(o.allege ?? 0) - 0.10 < -1e-9}
+                              onClick={() => stepAllege(i, -1)} title="Descendre l'ouvrant de 10 cm" aria-label="Descendre l'ouvrant de 10 cm">
+                              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14m0 0l6-6m-6 6l-6-6"/></svg>
+                            </button>
+                            <span />
+                          </div>
                         </div>
                       </div>
                       <button className="icon-btn danger" onClick={() => removeOuverture(i)} title="Supprimer l'ouverture" aria-label="Supprimer l'ouverture">
@@ -3681,7 +3755,7 @@ export default function App() {
               <div className="ouverture-main">
                 <div className="menuiserie-row">
                   <div className="fields-grid" style={{ flex: 1 }}>
-                    <Field label="Fenêtre de toit (catalogue)">
+                    <div className="field">
                       <select value={addFenId} onChange={(e) => setAddFenId(e.target.value)}>
                         {env.fenetresToit?.map((x) => (
                           <option key={x.id} value={x.id}>
@@ -3689,7 +3763,7 @@ export default function App() {
                           </option>
                         ))}
                       </select>
-                    </Field>
+                    </div>
                   </div>
                 </div>
                 <button type="button" className="btn primary small" onClick={validerAjoutFen}>Valider</button>
@@ -3702,12 +3776,12 @@ export default function App() {
           )}
           <p className="config-hint" style={{ marginTop: 0 }}>
             Choisissez une fenêtre de toit dans le catalogue (type, dimensions et tarif définis dans le
-            back-office), puis sa position le long du bas de pente (pas de 60 cm). Sur le plan, le cadre
-            en pointillé est placé à {FENETRE_TOIT_DEP_PX} px de la ligne directrice du bas de pente, et sa
-            profondeur projetée tient compte de la pente du versant ({penteOfPent(d, toitType, pentSel.versant)}°).
+            back-office), puis sa position le long du bas de pente (pas de 60 cm) et sa hauteur sur le
+            versant (pas de 10 cm ; à 0 cm la fenêtre est contre le mur). Sur le plan, la profondeur
+            projetée du cadre tient compte de la pente du versant ({penteOfPent(d, toitType, pentSel.versant)}°).
           </p>
           <div>
-            {fenetresPent.map((f, i) => {
+            {fenetresPent.map((f, i) => ({ f, i })).reverse().map(({ f, i }) => {
               const m = env.fenetresToit?.find((x) => x.id === f.fenetreId);
               return (
               <div key={i} className="ouverture">
@@ -3715,34 +3789,43 @@ export default function App() {
                 <div className="menuiserie-row">
                   {m?.image && <img src={m.image} alt={m.nom} className="menuiserie-thumb" />}
                   <div className="fields-grid" style={{ flex: 1 }}>
-                    <Field label="Fenêtre de toit (catalogue)">
+                    <div className="field">
                       <select value={f.fenetreId || ""} onChange={(e) => pickFen(i, e.target.value)}>
-                        <option value="">Fenêtre sur mesure…</option>
                         {env.fenetresToit?.map((x) => (
                           <option key={x.id} value={x.id}>
                             {x.nom} — {fmtCm(x.largeur)} × {fmtCm(x.hauteur)} cm{+x.tarif > 0 ? ` — ${fmtEur(x.tarif)} HT` : ""}
                           </option>
                         ))}
                       </select>
-                    </Field>
-                    <Field label="position le long du bas de pente">
-                      <div className="stepper">
-                        <button type="button" className="btn small step-arrow"
-                          disabled={f.position - POSITION_STEP < POSITION_MIN - 1e-9}
-                          onClick={() => stepFen(i, -1)} title="Déplacer vers le début du bas de pente" aria-label="Déplacer vers le début du bas de pente">
-                          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5m0 0l6-6m-6 6l6 6"/></svg>
-                        </button>
-                        <button type="button" className="btn small step-arrow"
-                          disabled={f.position + POSITION_STEP > fenPositionMax(f) + 1e-9}
-                          onClick={() => stepFen(i, 1)} title="Déplacer vers la fin du bas de pente" aria-label="Déplacer vers la fin du bas de pente">
-                          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14m0 0l-6-6m6 6l-6 6"/></svg>
-                        </button>
-                      </div>
-                    </Field>
-                    <Field label="hauteur sur le versant (cm)">
-                      <input type="number" step="0.1" min="0" value={Math.round((f.positionHauteur ?? 0) * 1000) / 10}
-                        onChange={(e) => updateFen(i, { positionHauteur: Math.min(Math.max(Math.round((+e.target.value || 0) * 10) / 1000, 0), Math.max(0, rampantLen - f.hauteur)) })} />
-                    </Field>
+                      <span className="field-note">Hauteur sur le versant : {fmtCm(f.positionHauteur ?? 0)} cm</span>
+                    </div>
+                    <div className="step-cross" title="Position le long du bas de pente (gauche / droite) et hauteur sur le versant (haut / bas), par pas de 10 cm">
+                      <span />
+                      <button type="button" className="btn small step-arrow"
+                        disabled={(f.positionHauteur ?? 0) + 0.10 > Math.max(0, rampantLen - f.hauteur) + 1e-9}
+                        onClick={() => stepHauteurFen(i, 1)} title="Monter la fenêtre de 10 cm" aria-label="Monter la fenêtre de 10 cm">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5m0 0l-6 6m6-6l6 6"/></svg>
+                      </button>
+                      <span />
+                      <button type="button" className="btn small step-arrow"
+                        disabled={f.position - POSITION_STEP < POSITION_MIN - 1e-9}
+                        onClick={() => stepFen(i, -1)} title="Déplacer vers le début du bas de pente" aria-label="Déplacer vers le début du bas de pente">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5m0 0l6-6m-6 6l6 6"/></svg>
+                      </button>
+                      <span className="step-cross-dot" />
+                      <button type="button" className="btn small step-arrow"
+                        disabled={f.position + POSITION_STEP > fenPositionMax(f) + 1e-9}
+                        onClick={() => stepFen(i, 1)} title="Déplacer vers la fin du bas de pente" aria-label="Déplacer vers la fin du bas de pente">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14m0 0l-6-6m6 6l-6 6"/></svg>
+                      </button>
+                      <span />
+                      <button type="button" className="btn small step-arrow"
+                        disabled={(f.positionHauteur ?? 0) - 0.10 < -1e-9}
+                        onClick={() => stepHauteurFen(i, -1)} title="Descendre la fenêtre de 10 cm" aria-label="Descendre la fenêtre de 10 cm">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14m0 0l6-6m-6 6l-6-6"/></svg>
+                      </button>
+                      <span />
+                    </div>
                   </div>
                 </div>
                 <button className="icon-btn danger" onClick={() => removeFen(i)} title="Supprimer la fenêtre de toit" aria-label="Supprimer la fenêtre de toit">
@@ -3897,15 +3980,13 @@ export default function App() {
             <div className="chiffrage-row"><span className="k">Coût estimatif</span><span className="v">{fmtEur(tarifs.total)} HT</span></div>
             <div className="chiffrage-row"><span className="k">TVA (20 %)</span><span className="v">{fmtEur(tarifs.total * 0.20)}</span></div>
             <div className="chiffrage-row total"><span className="k">Coût TTC</span><span className="v">{fmtEur(tarifs.total * 1.20)}</span></div>
+            <div className="chiffrage-row m2"><span className="k">Coût au m² (surface plancher {fmtM2(surfacePlancher(d, env))})</span><span className="v">{fmtEur(tarifs.total * 1.20 / Math.max(surfacePlancher(d, env), 1e-9))} TTC/m²</span></div>
           </div>
         </div>
       </div>
       </div>
       </div>
 
-      <footer className="foot">
-        Baracca × Archicad — données structurées pour l'API JSON Graphisoft + add-on Tapir.
-      </footer>
     </div>
   );
 }

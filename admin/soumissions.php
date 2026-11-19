@@ -6,8 +6,9 @@
 
 require_once __DIR__ . '/../includes/admin-auth.php';
 require_once __DIR__ . '/../includes/soumissions.php';
+require_once __DIR__ . '/../includes/acces.php';
 
-archicad_admin_require_auth();
+archicad_bo_require('soumissions');
 
 $message = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['supprimer'])) {
@@ -20,7 +21,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['supprimer'])) {
     }
 }
 
-$soumissions = archicad_load_soumissions();
+$soumissions = archicad_bo_filter_soumissions(archicad_load_soumissions()); // filtrées par zone si vendeur/partenaire
 $pageTitle = 'Soumissions';
 $adminPage = 'soumissions';
 include __DIR__ . '/../includes/admin-head.php';

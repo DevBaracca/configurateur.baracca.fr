@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
   bboxOf, dimsOf, epaisseurPlancher, toitureDefOf, formeDefOf, toitTypeOf,
-  pente1Of, pente2Of, hauteurFaitageDm, basPenteOf, penteOfPent, fenetresOfPent,
+  pente1Of, pente2Of, hauteurFaitageDm, deltaRiveDm, runFaitageDm, basPenteOf, penteOfPent, fenetresOfPent,
   couvListOf, couvIdOf, intListOf, intIdOf, plancherListOf, plancherIdOf, chantListOf, revIdOf,
   rgbHex, mixHex, SOL_SOUS_PLANCHER, toitVisOf,
   PLANCHER_DEPASSEMENT,
@@ -156,10 +156,23 @@ function buildScene(d, env) {
   const dimsList = insts.map((inst) => ({ inst, dm: dimsOf(d, env, inst) }));
   const over = {};
   const shared = {}; // côtés communs avec un voisin (pour le plancher)
+  const jointMur = {}; // côté commun : true si un mur occupe le joint (propre ou voisin), false si charpente des deux côtés, null si pas de joint
+  const jointOver = {}; // débord de rive AU JOINT (m) : côté commun nord/sud = position de la noue ; est/ouest = ep/2
   for (const { inst } of dimsList) {
     over[inst.id] = { nord: exDef, sud: exDef, est: exDef, ouest: exDef };
     shared[inst.id] = { nord: false, sud: false, est: false, ouest: false };
+    jointMur[inst.id] = { nord: null, sud: null, est: null, ouest: null };
+    jointOver[inst.id] = { nord: 0, sud: 0, est: 0, ouest: 0 };
   }
+  // Noue au joint nord/sud entre deux modules : point où les deux plans de versants
+  // (sud du module nord, pente p2, cote Hr+δ2 ; nord du module sud, pente p1, cote
+  // Hr+δ1) se coupent au-dessus du mur commun. d = distance depuis la ligne directrice
+  // sud du module nord ; pentes égales -> d = gap/2 (milieu du mur, comme avant).
+  const t1g = Math.tan(rad(p1)), t2g = Math.tan(rad(p2));
+  const dl1 = deltaRiveDm(p1, p2, p1, epToitV), dl2 = deltaRiveDm(p1, p2, p2, epToitV);
+  // pas de clamp à [0, gap] : l'arête de jonction peut tomber légèrement au-delà du
+  // mur commun (un versant recouvre alors tout le joint) — jamais de marche verticale
+  const noueSN = (gap) => Math.min(Math.max((dl2 - dl1 + gap * t1g) / (t1g + t2g), -gap), 2 * gap);
   const epsC = 1e-6;
   // Les positions des modules sont enregistrées avec l'épaisseur de mur en vigueur à
   // l'ajout : si l'isolation change ensuite, l'écart réel entre lignes directrices
@@ -179,12 +192,13 @@ function buildScene(d, env) {
       const gapW = A.inst.x - (B.inst.x + B.dm.longueur);
       const gapS = B.inst.y - (A.inst.y + A.dm.largeur);
       const gapN = A.inst.y - (B.inst.y + B.dm.largeur);
-      if (gapE > epsC && gapE <= epMax && ovY) { over[A.inst.id].est = ep; over[B.inst.id].ouest = 0; shared[A.inst.id].est = shared[B.inst.id].ouest = true; }
-      if (gapW > epsC && gapW <= epMax && ovY) { over[B.inst.id].est = ep; over[A.inst.id].ouest = 0; shared[B.inst.id].est = shared[A.inst.id].ouest = true; }
-      // Jonction sud/nord : les deux modules se décalent d'une MOITIÉ du mur commun
-      // (chacun prolonge sa pente de ep/2) -> les toits se rejoignent au milieu du mur
-      if (gapS > epsC && gapS <= epMax && ovX) { over[A.inst.id].sud = ep / 2; over[B.inst.id].nord = ep / 2; shared[A.inst.id].sud = shared[B.inst.id].nord = true; }
-      if (gapN > epsC && gapN <= epMax && ovX) { over[B.inst.id].sud = ep / 2; over[A.inst.id].nord = ep / 2; shared[B.inst.id].sud = shared[A.inst.id].nord = true; }
+      if (gapE > epsC && gapE <= epMax && ovY) { over[A.inst.id].est = ep; over[B.inst.id].ouest = 0; shared[A.inst.id].est = shared[B.inst.id].ouest = true; jointOver[A.inst.id].est = ep / 2; jointOver[B.inst.id].ouest = ep / 2; const jm = (A.inst.murs?.est?.actif !== false) || (B.inst.murs?.ouest?.actif !== false); jointMur[A.inst.id].est = jm; jointMur[B.inst.id].ouest = jm; }
+      if (gapW > epsC && gapW <= epMax && ovY) { over[B.inst.id].est = ep; over[A.inst.id].ouest = 0; shared[B.inst.id].est = shared[A.inst.id].ouest = true; jointOver[B.inst.id].est = ep / 2; jointOver[A.inst.id].ouest = ep / 2; const jm = (B.inst.murs?.est?.actif !== false) || (A.inst.murs?.ouest?.actif !== false); jointMur[B.inst.id].est = jm; jointMur[A.inst.id].ouest = jm; }
+      // Jonction sud/nord : noue — chaque versant est prolongé jusqu'au point où les
+      // deux plans de couverture se coupent au-dessus du mur commun (pas forcément le
+      // milieu en shed) -> les toitures se rejoignent sans marche, en bas de pente aussi
+      if (gapS > epsC && gapS <= epMax && ovX) { const d = noueSN(gapS); over[A.inst.id].sud = d; over[B.inst.id].nord = gapS - d; jointOver[A.inst.id].sud = d; jointOver[B.inst.id].nord = gapS - d; shared[A.inst.id].sud = shared[B.inst.id].nord = true; const jm = (A.inst.murs?.sud?.actif !== false) || (B.inst.murs?.nord?.actif !== false); jointMur[A.inst.id].sud = jm; jointMur[B.inst.id].nord = jm; }
+      if (gapN > epsC && gapN <= epMax && ovX) { const d = noueSN(gapN); over[B.inst.id].sud = d; over[A.inst.id].nord = gapN - d; jointOver[B.inst.id].sud = d; jointOver[A.inst.id].nord = gapN - d; shared[B.inst.id].sud = shared[A.inst.id].nord = true; const jm = (B.inst.murs?.sud?.actif !== false) || (A.inst.murs?.nord?.actif !== false); jointMur[B.inst.id].sud = jm; jointMur[A.inst.id].nord = jm; }
     }
   }
   // En monopente, le nord est le haut du toit (mur nord montant jusqu'au toit) :
@@ -249,10 +263,14 @@ function buildScene(d, env) {
     // Hauteurs de toit calculées sur la LIGNE DIRECTRICE, indépendamment des débords :
     // deux modules de mêmes dimensions ont exactement le même faîtage / bas de pente.
     let hF = 0, zr = (Z0 + Z1) / 2;
+    // shed (deux pentes différentes) : chaque versant est remonté de δ_i =
+    // ep·(1/cos p_i − 1/cos p_min) pour que les sous-faces du complexe rencontrent
+    // les murs intérieurs AU MÊME NIVEAU (parallélisme conservé, simple translation)
+    const dN = deltaRiveDm(p1, p2, p1, epToitV), dS = deltaRiveDm(p1, p2, p2, epToitV);
     if (tt === "monopente") hF = t1 * (Z1 - Z0);
     else if (tt === "deuxpentes") {
-      hF = hauteurFaitageDm(dm, p1, p2, tt);
-      zr = Z0 + (t1 > 0 ? Math.min(Math.max(hF / t1, 0), Z1 - Z0) : (Z1 - Z0) / 2);
+      hF = hauteurFaitageDm(dm, p1, p2, tt, epToitV);
+      zr = Z0 + runFaitageDm(dm, p1, p2, tt, epToitV);
     } else if (tt === "quatrepentes") { hF = t1 * (Z1 - Z0) / 2; zr = (Z0 + Z1) / 2; }
 
     /* ----- toiture : face supérieure par versant -----
@@ -269,7 +287,7 @@ function buildScene(d, env) {
         return [{ versant: "sud", poly: [V3(ox0, yN, oz0), V3(ox1, yN, oz0), V3(ox1, yS, oz1), V3(ox0, yS, oz1)] }];
       }
       if (tt === "deuxpentes") {
-        const yN = Hr - ovv.nord * t1, yS = Hr - ovv.sud * t2; // débords qui prolongent la pente
+        const yN = Hr + dN - ovv.nord * t1, yS = Hr + dS - ovv.sud * t2; // rives remontées de δ + débords qui prolongent la pente
         return [
           { versant: "nord", poly: [V3(ox0, yN, oz0), V3(ox1, yN, oz0), V3(ox1, Hr + hF, zr), V3(ox0, Hr + hF, zr)] },
           { versant: "sud", poly: [V3(ox0, yS, oz1), V3(ox1, yS, oz1), V3(ox1, Hr + hF, zr), V3(ox0, Hr + hF, zr)] },
@@ -288,9 +306,17 @@ function buildScene(d, env) {
       return null;
     };
     const roofPolysV = polysOf(rx0, rx1, rz0, rz1, ov); // couverture : empreinte AVEC débords
-    // complexe : empreinte sur la LIGNE DIRECTRICE seule (sans débord) — la pente du
-    // complexe et celle de la couverture sont alors strictement identiques
-    const cplxPolysV = polysOf(X0, X1, Z0, Z1, { nord: 0, sud: 0, est: 0, ouest: 0 });
+    // complexe : empreinte sur la LIGNE DIRECTRICE (face INTÉRIEURE des murs, sans
+    // débord), prolongée de ep/2 sur les côtés communs à un module accolé -> les deux
+    // complexes se rejoignent à l'AXE du joint (charpente centrale comprise), comme
+    // les murs et comme à l'export Archicad ; la rive verticale descend contre le mur
+    // en intérieur aux vrais bords (X0/X1/Z0/Z1), la pente = celle de la couverture
+    const jO = jointOver[inst.id] || { nord: 0, sud: 0, est: 0, ouest: 0 };
+    const cx0 = X0 - jO.ouest, cx1 = X1 + jO.est;
+    const cz0 = Z0 - jO.nord, cz1 = Z1 + jO.sud;
+    // le complexe prolonge AUSSI sa pente jusqu'à la noue du joint (ovv = jO) :
+    // couverture et complexe se rejoignent au même point, sans marche en bas de pente
+    const cplxPolysV = polysOf(cx0, cx1, cz0, cz1, jO);
     const roofPolys = roofPolysV ? roofPolysV.map((r) => r.poly) : null;
     if (roofPolys) for (const poly of roofPolys) for (const p of poly) maxTop = Math.max(maxTop, p.y);
 
@@ -342,25 +368,45 @@ function buildScene(d, env) {
         cursor = Math.max(cursor, o.position + o.largeur);
       }
       if (cursor < Lface - 1e-6) segs.push([cursor, Lface, 0, yMax]);
-      // jonction des angles : les murs nord/sud prolongés de l'épaisseur dans les coins
-      // couvrent les carrés d'angle — seulement si le côté perpendiculaire est un mur ;
-      // sinon c'est le poteau de charpente qui occupe le coin (il ne doit pas être recouvert)
-      if (segs.length && (face === "nord" || face === "sud")) {
-        if (inst.murs?.ouest?.actif !== false) segs[0][0] -= ep;
-        if (inst.murs?.est?.actif !== false) segs[segs.length - 1][1] += ep;
+      // jonction des angles : les murs prolongés de l'épaisseur dans les coins couvrent
+      // les carrés d'angle — seulement si le côté perpendiculaire est un mur ; sinon
+      // c'est le poteau de charpente qui occupe le coin (il ne doit pas être recouvert).
+      // Un coin prolongé (deux murs en angle) porte le revêtement EXTÉRIEUR sur sa tranche,
+      // pour que le revêtement soit continu à l'angle au lieu de la couleur par défaut.
+      // Charpente MAIS module accolé de l'autre côté du joint -> prolongation de ep/2 :
+      // le mur rejoint l'AXE de la charpente (le voisin prolonge l'autre moitié), comme
+      // à l'export Archicad. S'applique aux 4 faces (pignons est/ouest compris).
+      if (segs.length) {
+        const jm = jointMur[inst.id] || {};
+        const pW = inst.murs?.ouest?.actif !== false ? ep : (sh0.ouest ? (jm.ouest === true ? ep : ep / 2) : 0);
+        const pE = inst.murs?.est?.actif !== false ? ep : (sh0.est ? (jm.est === true ? ep : ep / 2) : 0);
+        const pN = inst.murs?.nord?.actif !== false ? ep : (sh0.nord ? (jm.nord === true ? ep : ep / 2) : 0);
+        const pS = inst.murs?.sud?.actif !== false ? ep : (sh0.sud ? (jm.sud === true ? ep : ep / 2) : 0);
+        if (face === "nord" || face === "sud") {
+          if (pW > 0) { segs[0][0] -= pW; segs[0][4] = true; } // coin ouest, tranche -x (index 1)
+          if (pE > 0) { segs[segs.length - 1][1] += pE; segs[segs.length - 1][5] = true; } // coin est, tranche +x (index 0)
+        } else {
+          if (pN > 0) { segs[0][0] -= pN; segs[0][6] = true; } // coin nord, tranche -z (index 5)
+          if (pS > 0) { segs[segs.length - 1][1] += pS; segs[segs.length - 1][7] = true; } // coin sud, tranche +z (index 4)
+        }
       }
 
-      for (const [u0, u1, y0, y1] of segs) {
+      for (const [u0, u1, y0, y1, coinO, coinE, coinN, coinS] of segs) {
         const wSeg = u1 - u0, hSeg = y1 - y0;
         if (wSeg <= 1e-6 || hSeg <= 1e-6) continue;
+        // BoxGeometry : [+x, -x, +y, -y, +z, -z] — murs nord/sud : tranche ouest = -x (1), est = +x (0) ;
+        // murs est/ouest : tranche nord = -z (5), sud = +z (4). Coin prolongé -> revêtement EXTÉRIEUR.
+        const matsSeg = (face === "nord" || face === "sud")
+          ? ((coinO || coinE) ? mats.map((m, k) => ((k === 1 && coinO) || (k === 0 && coinE) ? matOuter : m)) : mats)
+          : ((coinN || coinS) ? mats.map((m, k) => ((k === 5 && coinN) || (k === 4 && coinS) ? matOuter : m)) : mats);
         let mesh;
-        if (face === "nord") mesh = new THREE.Mesh(new THREE.BoxGeometry(wSeg, hSeg, ep), mats),
+        if (face === "nord") mesh = new THREE.Mesh(new THREE.BoxGeometry(wSeg, hSeg, ep), matsSeg),
           mesh.position.set(X0 + (u0 + u1) / 2, (y0 + y1) / 2, Z0 - ep / 2);
-        else if (face === "sud") mesh = new THREE.Mesh(new THREE.BoxGeometry(wSeg, hSeg, ep), mats),
+        else if (face === "sud") mesh = new THREE.Mesh(new THREE.BoxGeometry(wSeg, hSeg, ep), matsSeg),
           mesh.position.set(X0 + (u0 + u1) / 2, (y0 + y1) / 2, Z1 + ep / 2);
-        else if (face === "ouest") mesh = new THREE.Mesh(new THREE.BoxGeometry(ep, hSeg, wSeg), mats),
+        else if (face === "ouest") mesh = new THREE.Mesh(new THREE.BoxGeometry(ep, hSeg, wSeg), matsSeg),
           mesh.position.set(X0 - ep / 2, (y0 + y1) / 2, Z0 + (u0 + u1) / 2);
-        else mesh = new THREE.Mesh(new THREE.BoxGeometry(ep, hSeg, wSeg), mats),
+        else mesh = new THREE.Mesh(new THREE.BoxGeometry(ep, hSeg, wSeg), matsSeg),
           mesh.position.set(X1 + ep / 2, (y0 + y1) / 2, Z0 + (u0 + u1) / 2);
         scene.add(mesh);
       }
@@ -447,10 +493,30 @@ function buildScene(d, env) {
           maxTop = Math.max(maxTop, H + epToitV + epCV);
         }
       } else {
-        // complexe : mêmes versants mais sur l'empreinte seule (ligne directrice, sans débord)
+        // complexe : mêmes versants mais sur l'empreinte seule (ligne directrice = face
+        // intérieure des murs, sans débord). Sous-face = dessus décalé VERTICALEMENT de
+        // epToitV / un.y (= epToitV / cos pente) : c'est exactement le plan PARALLÈLE au
+        // versant à distance normale epToitV (faces sup/inf parallèles, épaisseur
+        // constante, shed OK) — et comme le décalage est purement vertical, toutes les
+        // jupes sont verticales : la rive du bas de complexe suit le mur (non coupée
+        // perpendiculairement au versant).
         if (vis.complexe_toiture && cplxPolysV) {
-          // groupe 0 (dessus + jupes/chant) = couleur du complexe ; groupe 1 (sous-face) = revêtement inférieur
-          for (const { poly } of cplxPolysV) scene.add(new THREE.Mesh(roofSlabGeometry([poly], epToitV), [cplxEdgeMat, sousFaceMat]));
+          for (const { poly } of cplxPolysV) {
+            const un = upNormal(poly);
+            const isNS = Math.abs(un.z) >= Math.abs(un.x);
+            const dy = epToitV / Math.max(un.y, 1e-6); // = epToitV / cos(pente) : reste sur le plan parallèle
+            const bots = [poly.map((p) => {
+              // rive = bord MUR (Z0/Z1 si versant nord/sud, X0/X1 sinon) ; le reste = faîtage/croupe
+              const onRive = isNS
+                ? Math.abs(p.z - Z0) < 1e-6 || Math.abs(p.z - Z1) < 1e-6
+                : Math.abs(p.x - X0) < 1e-6 || Math.abs(p.x - X1) < 1e-6;
+              return onRive
+                ? new THREE.Vector3(p.x, p.y - dy, p.z) // rive : jupe VERTICALE, suit le mur (même plan parallèle)
+                : new THREE.Vector3(p.x - un.x * epToitV, p.y - un.y * epToitV, p.z - un.z * epToitV); // faîtage : normale propre du versant (jonction par interpénétration)
+            })];
+            // groupe 0 = dessus + jupes, groupe 1 (sous-face, plane et parallèle au dessus) = revêtement inférieur
+            scene.add(new THREE.Mesh(roofSlabGeometry([poly], epToitV, bots), [cplxEdgeMat, sousFaceMat]));
+          }
         }
         // couverture : un mesh par versant (avec débords), posé sur le complexe :
         // sa sous-face = roofPolys (qui passe par Hr au droit de la ligne directrice,
@@ -465,7 +531,17 @@ function buildScene(d, env) {
             const cMat = cImg ? matWithMap(cImg, roofMat) : matCouleur(roofMat, cItem?.rgb, toitDef?.rgb || [120, 113, 108]);
             const epCV = epCouvVOf(inst, versant);
             const un = upNormal(poly);
-            const top = poly.map((p) => new THREE.Vector3(p.x + un.x * epCV, p.y + un.y * epCV, p.z + un.z * epCV));
+            const isNS = Math.abs(un.z) >= Math.abs(un.x);
+            const dyC = epCV / Math.max(un.y, 1e-6);
+            const top = poly.map((p) => {
+              // rive = bord EXTÉRIEUR du toit (avec débords) ; le reste = faîtage/croupe
+              const onRive = isNS
+                ? Math.abs(p.z - rz0) < 1e-6 || Math.abs(p.z - rz1) < 1e-6
+                : Math.abs(p.x - rx0) < 1e-6 || Math.abs(p.x - rx1) < 1e-6;
+              return onRive
+                ? new THREE.Vector3(p.x, p.y + dyC, p.z) // jupe verticale en rive
+                : new THREE.Vector3(p.x + un.x * epCV, p.y + un.y * epCV, p.z + un.z * epCV); // faîtage : normale propre du versant
+            });
             // sous-face explicite = poly : la couverture repose exactement sur le dessus
             // du complexe (pas de décalage vers l'extérieur, pas d'écart au faîtage)
             scene.add(new THREE.Mesh(roofSlabGeometry([top], epCV, [poly]), [cMat, cMat]));
@@ -495,7 +571,7 @@ function buildScene(d, env) {
           // la normale "sortante" (vers le haut) sert uniquement au décollement
           const n = new THREE.Vector3().crossVectors(u, s).normalize();
           const out = n.y >= 0 ? n : n.clone().negate();
-          const sc = 0.20 / cos + (f.positionHauteur ?? 0) + f.hauteur / 2; // distance le long du rampant depuis le bas de pente
+          const sc = (f.positionHauteur ?? 0) + f.hauteur / 2; // distance le long du rampant depuis le bas de pente (0 = contre le mur)
           const m = new THREE.Mesh(new THREE.BoxGeometry(f.largeur, f.hauteur, 0.06), fenMat);
           m.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(u, s, n));
           m.position.copy(E0).addScaledVector(s, sc).addScaledVector(out, 0.05);
@@ -540,7 +616,8 @@ export default function Vue3D({ d, env, w, h }) {
     const { scene, maxTop, span, textures } = buildScene(dConf, envRef.current);
 
     const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 500);
-    camera.position.set(span * 0.9, Math.max(span * 0.75, maxTop * 1.2), span * 1.15);
+    // Vue par défaut plus large (module entièrement visible) et plus rasante (axonométrie proche du sol)
+    camera.position.set(span * 1.25, Math.max(span * 0.42, maxTop * 0.85), span * 1.6);
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.set(0, maxTop / 2, 0);

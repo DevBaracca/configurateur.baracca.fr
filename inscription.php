@@ -143,12 +143,30 @@ include 'includes/head.html';
           <div class="auth-grid">
             <div class="form-group">
               <label for="password">Mot de passe <span class="required">*</span></label>
-              <input type="password" id="password" name="password" required minlength="8" autocomplete="new-password">
+              <div class="password-field">
+                <input type="password" id="password" name="password" required minlength="8" autocomplete="new-password">
+                <button type="button" class="password-toggle" id="password-toggle" aria-label="Afficher le mot de passe" title="Afficher / masquer le mot de passe">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <line class="eye-slash" x1="4" y1="4" x2="20" y2="20"></line>
+                  </svg>
+                </button>
+              </div>
               <small class="form-hint">8 caractères minimum.</small>
             </div>
             <div class="form-group">
               <label for="confirmation">Confirmer le mot de passe <span class="required">*</span></label>
-              <input type="password" id="confirmation" name="confirmation" required minlength="8" autocomplete="new-password">
+              <div class="password-field">
+                <input type="password" id="confirmation" name="confirmation" required minlength="8" autocomplete="new-password">
+                <button type="button" class="password-toggle" id="confirmation-toggle" aria-label="Afficher le mot de passe" title="Afficher / masquer le mot de passe">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <line class="eye-slash" x1="4" y1="4" x2="20" y2="20"></line>
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
           <div class="auth-actions">
@@ -159,5 +177,23 @@ include 'includes/head.html';
       </div>
     </div>
   </section>
+
+<script>
+  // Bascule afficher/masquer le mot de passe (icône œil) — champs mot de passe + confirmation
+  (function () {
+    [['password-toggle', 'password'], ['confirmation-toggle', 'confirmation']].forEach(function (pair) {
+      var btn = document.getElementById(pair[0]);
+      var input = document.getElementById(pair[1]);
+      if (!btn || !input) return;
+      btn.addEventListener('click', function () {
+        var show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        btn.classList.toggle('visible', show);
+        btn.setAttribute('aria-label', show ? 'Masquer le mot de passe' : 'Afficher le mot de passe');
+        btn.title = show ? 'Masquer le mot de passe' : 'Afficher / masquer le mot de passe';
+      });
+    });
+  })();
+</script>
 
 <?php include 'includes/footer.php'; ?>

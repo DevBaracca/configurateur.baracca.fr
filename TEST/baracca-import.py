@@ -1038,14 +1038,31 @@ def import_module(data, pick_origin=False):
             pass
     angle_nord = round(math.radians(pente), 6)
     angle_sud = round(math.radians(pente_sud), 6)
+    # v2.60 : décalage vertical de la rive de chaque versant en deux-pentes
+    # asymétrique (shed) — comme dans le configurateur (deltaRiveDm) : on remonte
+    # le versant dont la sous-face du complexe serait la plus basse, pour que les
+    # deux sous-faces rencontrent les murs intérieurs AU MÊME NIVEAU.
+    # δ = ep_complexe · (1/cos p − 1/cos p_min) ; nul si pentes égales.
+    _ep_toit0 = float(toit.get("epaisseur") or 0.30)
+    _pmin = min(pente, pente_sud)
+    _cm = math.cos(math.radians(_pmin))
+    d_rive_nord = _ep_toit0 * (1.0 / math.cos(math.radians(pente)) - 1.0 / _cm)
+    d_rive_sud = _ep_toit0 * (1.0 / math.cos(math.radians(pente_sud)) - 1.0 / _cm)
 
     def faitage(l_u):
-        """v2.18 : (position du faîtage depuis le bord nord, hauteur de faîtage)
+        """v2.60 : (position du faîtage depuis le bord nord, hauteur de faîtage)
         pour une largeur l_u. Symétrique : l/2 et tan(pente)*l/2. Asymétrique
-        (C=tan nord, P=tan sud) : x = l*P/(C+P) depuis le nord, hf = x*C."""
+        (C=tan nord, P=tan sud) : x = l*P/(C+P) depuis le nord, hf = x*C.
+        v2.60 : en shed, les rives des versants sont remontées de δ (d_rive_nord /
+        d_rive_sud, alignement des sous-faces en rive comme dans le configurateur) :
+        le faîtage commun s'ajuste -> hf = (l + δN/C + δS/P)/(1/C + 1/P) et
+        x = (hf − δN)/C. Pentes égales : δ = 0, formules v2.18 inchangées."""
         C = math.tan(math.radians(pente))
         P = math.tan(math.radians(pente_sud))
         if geo == "deuxpentes" and C > 0 and P > 0:
+            if d_rive_nord or d_rive_sud:
+                hf = (l_u + d_rive_nord / C + d_rive_sud / P) / (1.0 / C + 1.0 / P)
+                return (hf - d_rive_nord) / C, hf
             x = l_u * P / (C + P)
             return x, x * C
         return l_u / 2.0, C * l_u / 2.0
@@ -1685,8 +1702,20 @@ def import_module(data, pick_origin=False):
                 ep_tot = float(seg.get("epaisseur_totale") or seg.get("epaisseur") or 0.255) if seg else 0.255
                 g = 0.0 if (geo == "monopente" and face_key == "nord") else voisin_gap(face_key)
                 if g > 0:
-                    # v2.33 : jonction -> les deux couvertures se rejoignent à l'AXE
-                    # (milieu de l'écart), comme les murs découpés à l'axe (v2.32)
+                    # v2.60 : jonction SUD/NORD en deux-pentes -> NOUE : chaque versant
+                    # est prolongé jusqu'au point où les deux plans de couverture se
+                    # coupent au-dessus du mur commun (comme dans la 3D du
+                    # configurateur) : d = (δS − δN + g·tan pN)/(tan pN + tan pS),
+                    # mesuré depuis la ligne directrice SUD du module au nord.
+                    # -> les toitures se rejoignent sans marche, même en shed.
+                    # Est/ouest et pentes égales : milieu de l'écart (v2.33).
+                    if face_key in ("sud", "nord") and geo == "deuxpentes":
+                        C = math.tan(math.radians(pente))
+                        P = math.tan(math.radians(pente_sud))
+                        if C > 0 and P > 0:
+                            raw = (d_rive_sud - d_rive_nord + g * C) / (C + P)
+                            d = min(max(raw, -g), 2 * g)
+                            return d if face_key == "sud" else g - d
                     return g / 2.0
                 if seg is None:
                     return deb + 0.255      # rive en charpente : débord + ép. mur
@@ -1728,10 +1757,12 @@ def import_module(data, pick_origin=False):
                            (ep_toit, emp_v, "couverture", toit_comp_id)]
 
             def add_roof(delta, poly, with_angle, pivot=None, role="complexe",
-                         multi=None, versant=None, angle_rad=None, comp=None):
+                         multi=None, versant=None, angle_rad=None, comp=None, dr=0.0):
                 # v2.26 : épaisseur selon le plan d'inclinaison -> delta vertical
                 pr = angle_rad if angle_rad is not None else (angle if with_angle else 0.0)
-                level = H + delta / max(math.cos(pr), 0.2)
+                # v2.60 : dr = remontée de la rive du versant en shed (δ), pour
+                # aligner les sous-faces du complexe en rive comme dans le configurateur
+                level = H + delta / max(math.cos(pr), 0.2) + dr
                 r = {"level": round(level, 6), "polygonCoordinates": poly}
                 cid = comp or toit_comp_id
                 if cid:
@@ -1798,16 +1829,24 @@ def import_module(data, pick_origin=False):
                                        {"x": emp[1]["x"], "y": ydemi},
                                        {"x": emp[0]["x"], "y": ydemi}],
                                  True, pivot=piv_n, role=role, versant="nord",
-                                 angle_rad=angle_nord, comp=comp)
+                                 angle_rad=angle_nord, comp=comp, dr=d_rive_nord)
                         add_roof(delta, [{"x": emp[0]["x"], "y": ydemi},
                                        {"x": emp[1]["x"], "y": ydemi}, emp[2], emp[3]],
                                  True, pivot=piv_s, role=role, versant="sud",
-                                 angle_rad=angle_sud, comp=comp)
+                                 angle_rad=angle_sud, comp=comp, dr=d_rive_sud)
                 else:
                     for delta, emp, role, comp in niveaux:
                         add_roof(delta, emp, geo == "deuxpentes", role=role, comp=comp)
 
-    build_roofs(use_multi=(geo == "deuxpentes"))
+    # v2.60 : en shed (deux-pentes asymétrique avec épaisseur de complexe), on
+    # passe en versants monoplanes : c'est le seul mode où chaque versant peut
+    # porter sa propre remontée δ (d_rive_nord/sud) — en multi-plans Archicad
+    # calculerait un faîtage sans δ, incohérent avec le configurateur.
+    _shed = geo == "deuxpentes" and abs(angle_nord - angle_sud) > 1e-9 and _ep_toit0 > 0
+    if _shed:
+        print("  … deux-pentes asymétrique (shed) : versants monoplanes avec δ "
+              f"(δN={d_rive_nord:.4f} m, δS={d_rive_sud:.4f} m) pour coller au configurateur.")
+    build_roofs(use_multi=(geo == "deuxpentes" and not _shed))
     # Boucle de replis CreateRoofs (v2.18) : selon la version de Tapir, on
     # peut tomber successivement sur : favoriteName refusé, levels/pivotEdges
     # refusés (-> repli versants v2.9), 'angle' refusé. Chaque repli enlève

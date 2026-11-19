@@ -7,18 +7,20 @@
 require_once __DIR__ . '/../includes/admin-auth.php';
 require_once __DIR__ . '/../includes/users.php';
 require_once __DIR__ . '/../includes/configurations.php';
+require_once __DIR__ . '/../includes/acces.php';
 
-archicad_admin_require_auth();
+archicad_bo_require('utilisateurs');
 
-$users = archicad_load_users();
+$users = archicad_bo_filter_users(archicad_users_by_role('client')); // clients, filtrés par zone si vendeur/partenaire
 $success = (string) ($_GET['success'] ?? '');
 
 $pageTitle = 'Utilisateurs';
-$adminPage = 'utilisateurs';
+$adminPage = 'comptes';
 include __DIR__ . '/../includes/admin-head.php';
 ?>
     <div class="admin-card">
-      <h1>Utilisateurs du configurateur</h1>
+      <h1>Gestion des comptes</h1>
+      <?php archicad_comptes_tabs('utilisateurs'); ?>
       <p>Les clients créent eux-mêmes leur compte depuis la page d'inscription. Cliquez sur le nom d'un client pour voir sa fiche détaillée : c'est depuis cette fiche que vous pouvez réinitialiser son mot de passe ou supprimer son compte (ses configurations enregistrées sont alors supprimées également).</p>
       <?php if ($success === 'deleted'): ?>
         <p class="admin-message admin-message-success">Compte supprimé, ainsi que ses configurations enregistrées.</p>

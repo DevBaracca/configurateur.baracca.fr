@@ -178,7 +178,12 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 /* position des ouvertures : flèches gauche/droite (pas de saisie libre, position non affichée) */
 .stepper { display: flex; align-items: center; gap: 8px; }
 .stepper .btn { min-width: 42px; }
+.stepper.vert { flex-direction: column; align-items: flex-start; gap: 6px; }
 .step-arrow { display: inline-flex; align-items: center; justify-content: center; }
+/* croix de réglage : position horizontale + allège/hauteur verticale en « + » */
+.step-cross { display: grid; grid-template-columns: repeat(3, auto); gap: 4px; justify-content: start; align-items: center; }
+.step-cross-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border); justify-self: center; }
+.field-note { font-size: 0.75rem; color: var(--muted); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .checkline { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; margin-bottom: 6px; }
 .ouverture { border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 12px; background: #fff; }
@@ -228,6 +233,8 @@ hr.sep { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
 .chiffrage-row .v { font-size: 0.95rem; font-weight: 600; color: var(--text); }
 .chiffrage-row.total { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 8px; }
 .chiffrage-row.total .k, .chiffrage-row.total .v { font-size: 1.05rem; font-weight: 700; }
+/* ligne « coût au m² » : même taille/couleur que les autres lignes (TVA, coût estimatif), séparée par un trait fin */
+.chiffrage-row.m2 { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 8px; }
 
 /* espace client : configurations enregistrées */
 .account-box { border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 12px; background: #fff; }
