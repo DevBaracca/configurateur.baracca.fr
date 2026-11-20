@@ -9,6 +9,10 @@
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/configurations.php';
 
+// Réponses toujours en JSON pur (un warning PHP ne doit pas corrompre le
+// payload : display_errors=0, les erreurs restent loguées côté serveur)
+ini_set('display_errors', '0');
+
 header('Content-Type: application/json; charset=utf-8');
 
 // Compte client connecté, ou session administrateur (id « admin:<username> »)
@@ -25,11 +29,15 @@ if (!is_array($body)) {
 }
 $action = (string) ($body['action'] ?? '');
 $userId = (string) $user['id'];
+$isAdmin = archicad_is_admin(); // session administrateur : voit / supprime TOUTES les configurations
 
 switch ($action) {
     case 'list':
-        $list = array_map(function ($c) {
-            return [
+        // Admin : toutes les configurations enregistrées (avec le propriétaire) ;
+        // client : uniquement les siennes
+        $source = $isAdmin ? archicad_load_configurations() : archicad_user_configurations($userId);
+        $list = array_map(function ($c) use ($isAdmin) {
+            $row = [
                 'id' => (string) $c['id'],
                 'nom' => (string) $c['nom'],
                 'description' => (string) ($c['description'] ?? ''),
@@ -37,7 +45,13 @@ switch ($action) {
                 'created' => (string) $c['created'],
                 'updated' => (string) $c['updated'],
             ];
-        }, archicad_user_configurations($userId));
+            if ($isAdmin) {
+                $row['by'] = (string) ($c['userId'] ?? '');
+                $row['modele'] = !empty($c['modele']);
+            }
+            return $row;
+        }, $source);
+        usort($list, fn ($a, $b) => strcmp((string) $b['updated'], (string) $a['updated']));
         echo json_encode(['ok' => true, 'configurations' => $list]);
         break;
 
@@ -71,7 +85,7 @@ switch ($action) {
 
     case 'get':
         $config = archicad_find_configuration((string) ($body['id'] ?? ''));
-        if ($config === null || ($config['userId'] ?? '') !== $userId) {
+        if ($config === null || (!$isAdmin && ($config['userId'] ?? '') !== $userId)) {
             http_response_code(404);
             echo json_encode(['ok' => false, 'error' => 'Configuration introuvable.']);
             break;
@@ -80,7 +94,11 @@ switch ($action) {
         break;
 
     case 'delete':
-        $ok = archicad_delete_configuration($userId, (string) ($body['id'] ?? ''));
+        // Admin : peut supprimer n'importe quelle configuration (y compris les
+        // modèles) ; client : uniquement la sienne
+        $ok = $isAdmin
+            ? archicad_admin_delete_configuration((string) ($body['id'] ?? ''))
+            : archicad_delete_configuration($userId, (string) ($body['id'] ?? ''));
         if (!$ok) {
             http_response_code(404);
         }

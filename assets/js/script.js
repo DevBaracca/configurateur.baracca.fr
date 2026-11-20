@@ -9,6 +9,7 @@
 document.addEventListener('DOMContentLoaded', () => {
   initSmoothScroll();
   initMobileMenu();
+  initAccountMenu();
   initCounters();
   initScrollAnimations();
   initScrollHeader();
@@ -155,6 +156,44 @@ function initMobileMenu() {
         <line x1="3" y1="6" x2="21" y2="6"></line>
         <line x1="3" y1="18" x2="21" y2="18"></line>
       `;
+    }
+  });
+}
+
+// ============================================
+// 4b. Menu compte (utilisateur connecté) dans le header
+// ============================================
+function initAccountMenu() {
+  const btn = document.getElementById('account-btn');
+  const menu = document.getElementById('account-dropdown');
+
+  if (!btn || !menu) return;
+
+  const close = () => {
+    menu.classList.add('hidden');
+    btn.setAttribute('aria-expanded', 'false');
+  };
+
+  // Toggle menu
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const willOpen = menu.classList.contains('hidden');
+    menu.classList.toggle('hidden');
+    btn.setAttribute('aria-expanded', String(willOpen));
+  });
+
+  // Close menu when clicking outside
+  document.addEventListener('click', (e) => {
+    if (menu.classList.contains('hidden')) return;
+    const path = e.composedPath();
+    if (!path.includes(btn) && !path.includes(menu)) close();
+  });
+
+  // Close menu with Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !menu.classList.contains('hidden')) {
+      close();
+      btn.focus();
     }
   });
 }

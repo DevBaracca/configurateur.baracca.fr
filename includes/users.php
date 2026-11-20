@@ -125,10 +125,11 @@ function archicad_users_count_role(string $role): int
 
 /**
  * Crée un compte « staff » (vendeur ou partenaire) : mêmes champs qu'un client,
- * plus le rôle et la liste des rubriques du back-office autorisées ($acces =
- * tableau de clés, ex. ['index', 'soumissions', 'configurateur:murs']).
+ * plus le rôle, la liste des rubriques du back-office autorisées ($acces =
+ * tableau de clés, ex. ['index', 'soumissions', 'configurateur:murs']) et la
+ * zone géographique ($departements = codes départements attribués).
  */
-function archicad_add_staff(array $fields, string $password, string $role, array $acces): array|false
+function archicad_add_staff(array $fields, string $password, string $role, array $acces, array $departements = []): array|false
 {
     if (!in_array($role, archicad_bo_roles(), true)) {
         return false;
@@ -137,14 +138,16 @@ function archicad_add_staff(array $fields, string $password, string $role, array
     if ($user === false) {
         return false;
     }
-    return archicad_update_staff((string) $user['id'], $fields, $role, $acces);
+    return archicad_update_staff((string) $user['id'], $fields, $role, $acces, $departements);
 }
 
 /**
  * Met à jour un compte staff : profil (comme archicad_update_user) + rôle +
- * accès. $acces : tableau de clés de rubriques cochées (vide = aucun accès BO).
+ * accès + zone géographique. $acces : tableau de clés de rubriques cochées
+ * (vide = aucun accès BO). $departements : codes départements attribués
+ * (vide = aucune restriction de zone).
  */
-function archicad_update_staff(string $id, array $fields, string $role, array $acces): array|false
+function archicad_update_staff(string $id, array $fields, string $role, array $acces, array $departements = []): array|false
 {
     if (!in_array($role, archicad_bo_roles(), true)) {
         return false;
@@ -158,6 +161,7 @@ function archicad_update_staff(string $id, array $fields, string $role, array $a
         if (($u['id'] ?? '') === $id) {
             $users[$i]['role'] = $role;
             $users[$i]['acces'] = array_values(array_unique(array_map('strval', $acces)));
+            $users[$i]['departements'] = array_values(array_unique(array_map('strval', $departements)));
             return archicad_save_users($users) ? $users[$i] : false;
         }
     }

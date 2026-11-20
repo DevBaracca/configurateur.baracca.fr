@@ -2,10 +2,26 @@
 // Attendu avant inclusion : $pageTitle (optionnel), $adminPage (section active)
 // Mise en page graphique du header/footer du blog (structure .header/.nav de style.css)
 require_once __DIR__ . '/acces.php';
+require_once __DIR__ . '/auth.php'; // archicad_is_logged_in() : session client des vendeurs/partenaires
 $adminPage = $adminPage ?? '';
 // Connecté au back-office : administrateur, vendeur ou partenaire
 $adminLoggedIn = archicad_bo_is_logged_in();
 $confHome = $adminLoggedIn ? archicad_bo_configurateur_home() : null;
+// Nom affiché dans le menu de droite : username admin (session), ou fiche du staff
+$boAccountName = '';
+if ($adminLoggedIn) {
+    if (!empty($_SESSION['archicad_admin_username'])) {
+        $boAccountName = (string) $_SESSION['archicad_admin_username'];
+    } else {
+        $boStaff = archicad_bo_current_staff();
+        if ($boStaff !== null) {
+            $boAccountName = trim(((string) ($boStaff['prenom'] ?? '')) . ' ' . ((string) ($boStaff['nom'] ?? '')));
+            if ($boAccountName === '') $boAccountName = (string) ($boStaff['email'] ?? '');
+        }
+    }
+}
+// Lien « Mon compte » (page client ../compte.php) seulement avec une session client active
+$boIsClientLogged = archicad_is_logged_in();
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -36,7 +52,7 @@ $confHome = $adminLoggedIn ? archicad_bo_configurateur_home() : null;
             <?php if ($confHome !== null): ?>
               <li><a href="<?= htmlspecialchars($confHome) ?>"<?= $adminPage === 'configurateur' ? ' class="active"' : '' ?>>Configurateur</a></li>
             <?php endif; ?>
-            <?php if (archicad_bo_can('comptes')): ?>
+            <?php if (archicad_bo_can_or_children('comptes')): ?>
               <li><a href="comptes.php"<?= $adminPage === 'comptes' ? ' class="active"' : '' ?>>Gestion des comptes</a></li>
             <?php endif; ?>
           </ul>
@@ -48,7 +64,18 @@ $confHome = $adminLoggedIn ? archicad_bo_configurateur_home() : null;
         <?php endif; ?>
         <div class="nav-actions">
           <?php if ($adminLoggedIn): ?>
-            <a href="logout.php" class="btn btn-secondary">Se déconnecter</a>
+            <div class="account-menu">
+              <button type="button" class="account-btn" id="account-btn" aria-haspopup="true" aria-expanded="false">
+                <span class="account-name"><?= htmlspecialchars($boAccountName) ?></span>
+                <svg class="account-caret" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </button>
+              <div class="account-dropdown hidden" id="account-dropdown">
+                <?php if ($boIsClientLogged): ?>
+                  <a href="../compte.php">Mon compte</a>
+                <?php endif; ?>
+                <a href="logout.php">Se déconnecter</a>
+              </div>
+            </div>
           <?php else: ?>
             <a href="index.php" class="nav-admin" title="Administration" aria-label="Administration">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -74,7 +101,8 @@ $confHome = $adminLoggedIn ? archicad_bo_configurateur_home() : null;
             <?php if (archicad_bo_can('index')): ?><li><a href="index.php">Tableau de bord</a></li><?php endif; ?>
             <?php if (archicad_bo_can('soumissions')): ?><li><a href="soumissions.php">Soumissions</a></li><?php endif; ?>
             <?php if ($confHome !== null): ?><li><a href="<?= htmlspecialchars($confHome) ?>">Configurateur</a></li><?php endif; ?>
-            <?php if (archicad_bo_can('comptes')): ?><li><a href="comptes.php">Gestion des comptes</a></li><?php endif; ?>
+            <?php if (archicad_bo_can_or_children('comptes')): ?><li><a href="comptes.php">Gestion des comptes</a></li><?php endif; ?>
+            <?php if ($boIsClientLogged): ?><li><a href="../compte.php">Mon compte</a></li><?php endif; ?>
             <li><a href="logout.php">Se déconnecter</a></li>
           <?php else: ?>
             <li><a href="../index.php">Accueil</a></li>

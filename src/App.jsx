@@ -94,7 +94,8 @@ const DEFAULTS = {
   autonomie: null, // pack autonomie choisi (catalogue « autonomie » : liste de systèmes autonomes)
   promoCode: "", // code promotion saisi par le client (rubrique « Promotion »)
   forme: null, // forme de toiture choisie (catalogue « formes » : géométrie, pentes)
-  charpente: null, // charpente choisie (catalogue « charpentes »)
+  charpente: null, // poutre choisie (catalogue « poutres » — sablières, outil Poutre)
+  poteau: null,    // poteau choisi (catalogue « poteaux » — outil Poteau)
   geometrie: null, // géométrie de la forme : monopente / deuxpentes / quatrepentes
   depassee: null, // débord de toiture chosen côté client (cm) ; null = valeur de la forme (back-office)
   longueur: 6.0,
@@ -828,7 +829,7 @@ function tarifTotal(d, env) {
           .reduce((ss, o) => ss + tarifOuverture(o, env.menuiseries) * margeOf(env, "menuiseries"), 0);
       } else {
         const cd = env.charpentes?.find((c) => c.id === d.charpente);
-        promoBaseAmount += (cd ? +cd.tarif || 0 : 0) * margeOf(env, "charpentes");
+        promoBaseAmount += (cd ? +cd.tarif || 0 : 0) * margeOf(env, "poutres");
       }
     });
     // pents : complexe de toiture + couverture
@@ -931,7 +932,8 @@ function buildExport(d, env) {
       nom: d.nom,
       modele: env.modules?.find((m) => m.id === d.moduleId)?.nom ?? null, // modèle de module choisi
       isolation: isoDef ? { id: isoDef.id, nom: isoDef.nom } : null, // isolation choisie (mur + plancher + toiture)
-      charpente: (env.charpentes?.find((x) => x.id === d.charpente)) || null, // charpente choisie
+      charpente: (env.charpentes?.find((x) => x.id === d.charpente)) || null, // poutre choisie (sablières, outil Poutre)
+      poteau: (env.poteaux?.find((x) => x.id === d.poteau)) || null, // poteau choisi (outil Poteau) — favori des CreateColumns à l'import
       autonomie: (() => { // pack autonomie choisi : liste de systèmes autonomes
         const autoDef = env.autonomies?.find((a) => a.id === d.autonomie) || null;
         if (!autoDef) return null;
@@ -958,7 +960,9 @@ function buildExport(d, env) {
         // plancher = [revêtement supérieur, plancher catalogue], les chants
         // sont le revêtement de la tranche (côté)
         couches: [
-          { role: "superieur", ...coucheRev(intListOf(env), d.revetementPlancher, plancherDef.revetement_sup) },
+          // revêtement supérieur du plancher : catalogue « Plancher » (rev_plancher),
+          // comme le choix côté client et le chiffrage — PAS l'onglet « Intérieur »
+          { role: "superieur", ...coucheRev(plancherListOf(env), plancherIdOf(env, d.revetementPlancher, plancherDef.revetement_sup), null) },
           { role: "plancher", id: plancherDef.id, nom: plancherDef.nom, favori: plancherDef.favori ?? "", epaisseur: +epaisseurPlancher(d, env.planchers).toFixed(3) },
         ],
         chants: coucheRev(chantListOf(env), plancherIdOf(env, d.revetementChantPlancher, plancherDef.revetement_chants ?? murDef.surface), null),
@@ -1596,12 +1600,12 @@ function Elevation({ d, murs, planchers, surfaces, chants, interieurs, couvertur
       path: `M ${caS} ${yEave} L ${cbS} ${yEave} L ${cbS} ${yEave + epToitReelPx} L ${caS} ${yEave + epToitReelPx} Z`, fill: fillCplx,
       couv: { path: `M ${caS} ${yEave} L ${cbS} ${yEave} L ${cbS} ${yEave + epC} L ${caS} ${yEave + epC} Z`, fill: fillToit },
     });
-    if (toitType === "terrasse") return { path: `M ${xaS} ${yTop} L ${xbS} ${yTop} L ${xbS} ${yTop - epToitPx} L ${xaS} ${yTop - epToitPx} Z`, fill: fillToit, dash: null, cote: false, bande: bandeHoriz(yTop) };
+    if (toitType === "terrasse") return { path: `M ${xaS} ${yTop} L ${xbS} ${yTop} L ${xbS} ${yTop - epToitPx} L ${xaS} ${yTop - epToitPx} Z`, fill: fillToit, dash: null, cote: false, bande: bandeHoriz(yTop), bbox: [xaS, yTop - epToitPx, xbS, yTop] };
     if (toitType === "monopente") {
       // façade nord = pignon haut : le mur monte jusqu'au toit, la toiture n'est
       // vue que de chant (trait du haut) ; façade sud = versant vu de face (bande)
       if (horiz && faceKey === "nord") return { path: `M ${xaS} ${yTop - hF} L ${xbS} ${yTop - hF}`, fill: "none", dash: null, cote: false, bande: bandeHoriz(yTop - hF) };
-      if (horiz) return { path: `M ${xaS} ${yRive} L ${xaS} ${yTop - hF} L ${xbS} ${yTop - hF} L ${xbS} ${yRive} Z`, fill: fillToit, dash: null, cote: true, bande: bandeHoriz(yTop) };
+      if (horiz) return { path: `M ${xaS} ${yRive} L ${xaS} ${yTop - hF} L ${xbS} ${yTop - hF} L ${xbS} ${yRive} Z`, fill: fillToit, dash: null, cote: true, bande: bandeHoriz(yTop), bbox: [xaS, yTop - hF, xbS, yRive] };
       // est/ouest (pignon monopente) : contour avec débord le long de la pente
       const [mx0, my0, mx1, my1] = prolonge(...(faceKey === "ouest" ? [xaS, yTop - hF, xbS, yTop] : [xaS, yTop, xbS, yTop - hF]), debG ? debP : 0, debD ? debP : 0);
       // bande complexe sur la même droite que le contour, limitée à la ligne directrice
@@ -1622,9 +1626,9 @@ function Elevation({ d, murs, planchers, surfaces, chants, interieurs, couvertur
     }
     if (horiz && toitType === "quatrepentes") {
       const rx1 = x0s + (dm.largeur / 2) * scale, rx2 = x0s + Ls - (dm.largeur / 2) * scale;
-      return { path: `M ${xaS} ${yRive} L ${rx1} ${yTop - hF} L ${rx2} ${yTop - hF} L ${xbS} ${yRive} Z`, fill: fillToit, dash: null, cote: false, bande: bandeHoriz(yTop) };
+      return { path: `M ${xaS} ${yRive} L ${rx1} ${yTop - hF} L ${rx2} ${yTop - hF} L ${xbS} ${yRive} Z`, fill: fillToit, dash: null, cote: false, bande: bandeHoriz(yTop), bbox: [xaS, yTop - hF, xbS, yRive] };
     }
-    if (horiz) return { path: `M ${xaS} ${yRive} L ${xaS} ${yTop - hF} L ${xbS} ${yTop - hF} L ${xbS} ${yRive} Z`, fill: fillToit, dash: null, cote: true, bande: bandeHoriz(yTop) };
+    if (horiz) return { path: `M ${xaS} ${yRive} L ${xaS} ${yTop - hF} L ${xbS} ${yTop - hF} L ${xbS} ${yRive} Z`, fill: fillToit, dash: null, cote: true, bande: bandeHoriz(yTop), bbox: [xaS, yTop - hF, xbS, yRive] };
     // est/ouest, deux pentes ou croupe (vue de pignon) : le mur monte jusqu'au
     // faitage, la couverture n'est dessinée qu'en contour
     const hFm = hauteurFaitageDm(dm, pente1Of(d), pente2Of(d), toitType, epToit);
@@ -1991,11 +1995,13 @@ function Elevation({ d, murs, planchers, surfaces, chants, interieurs, couvertur
             <path d={seg.toit.path} stroke={mixHex(seg.toit.contour || rgbHex(toitRgb), "#ffffff", 0.6 * t)} strokeWidth={toitStrokePx} fill={seg.toit.fill} strokeLinejoin="round" strokeLinecap="butt" />
             {vis.couverture && (() => {
               const im = couvImgOfSeg(seg);
-              if (!im || seg.toit.fill === "none") return null;
-              const iy = seg.yToit - seg.hF - epToitPx - 6;
+              if (!im || seg.toit.fill === "none" || !seg.toit.bbox) return null;
+              // le visuel de couverture recouvre TOUTE la surface du toit, débords compris
+              // (bas de pente et côtés) — sinon la couleur de repli grisée apparaît sur les débords
+              const [bx0, by0, bx1, by1] = seg.toit.bbox;
               return (
-                <image href={im} xlinkHref={im} x={seg.x0s - epPx - depPx} y={iy}
-                  width={seg.Ls + 2 * epPx + 2 * depPx} height={seg.hF + epToitPx + 12}
+                <image href={im} xlinkHref={im} x={bx0 - 6} y={by0 - 6}
+                  width={bx1 - bx0 + 12} height={by1 - by0 + 12}
                   preserveAspectRatio="xMidYMid slice" clipPath={`url(#toitClip-${i})`} />
               );
             })()}
@@ -2347,7 +2353,10 @@ export default function App() {
     marges: catalogue?.marges || {}, // coefficients de marge par rubrique (zones Catalogue / Revêtements)
     promotions: catalogue?.promotions || [], // codes promotionnels (zone Structure)
     formes: catalogue?.formes?.length ? catalogue.formes : FORMES,
-    charpentes: catalogue?.charpentes?.length ? catalogue.charpentes : CHARPENTES,
+    // poutres (sablières) et poteaux : deux catalogues séparés côté back-office
+    // (une seule référence Archicad par élément) ; repli legacy sur « charpentes »
+    charpentes: catalogue?.poutres?.length ? catalogue.poutres : (catalogue?.charpentes?.length ? catalogue.charpentes : CHARPENTES),
+    poteaux: catalogue?.poteaux?.length ? catalogue.poteaux : (catalogue?.poutres?.length ? catalogue.poutres : (catalogue?.charpentes?.length ? catalogue.charpentes : CHARPENTES)),
     toitures: catalogue?.toitures?.length ? catalogue.toitures : TOITURES,
   };
 
@@ -2400,7 +2409,8 @@ export default function App() {
   const murSel = env.murs.find((m) => m.id === d.murType);
   const moduleSel = env.modules?.find((m) => m.id === d.moduleId);
   const isoSel = env.isolations?.find((x) => x.id === d.isolation);
-  const charpenteSel = env.charpentes?.find((x) => x.id === d.charpente);
+  const charpenteSel = env.charpentes?.find((x) => x.id === d.charpente); // poutre (sablière)
+  const poteauSel = env.poteaux?.find((x) => x.id === d.poteau) || charpenteSel; // poteau (repli sur la poutre)
   const surfaceSel = env.facades.find((f) => f.id === extIdOf(env, murSel?.surface, d.facade)) || env.facades[0];
   const surfaceNom = (id) => env.facades.find((f) => f.id === id)?.nom || "—";
   const plancherNom = (id) => plancherListOf(env).find((f) => f.id === id)?.nom || "—"; // revêtement de plancher (catalogue « Plancher »)
@@ -2578,9 +2588,12 @@ export default function App() {
       : { isolation: null });
   };
 
-  /* Choix de la charpente (onglet Charpente) */
+  /* Choix de la poutre (sablière) et du poteau — catalogues « poutres » / « poteaux » */
   const applyCharpente = (id) => {
     set(env.charpentes?.some((x) => x.id === id) ? { charpente: id } : { charpente: null });
+  };
+  const applyPoteau = (id) => {
+    set(env.poteaux?.some((x) => x.id === id) ? { poteau: id } : { poteau: null });
   };
 
   /* Choix du pack autonomie (rubrique « Autonomie » des réglages généraux) :
@@ -2853,6 +2866,15 @@ export default function App() {
       if (e.murs?.length && !e.murs.some((m) => m.id === prev.murType)) patch.murType = e.murs[0].id;
       if (e.planchers?.length && !e.planchers.some((p) => p.id === prev.plancher)) patch.plancher = e.planchers[0].id;
       if (e.surfaces?.length && !e.surfaces.some((f) => f.id === prev.facade)) patch.facade = defautOf(e.surfaces)?.id ?? e.surfaces[0].id;
+      // poteau : les configurations sauvegardées avant la séparation des onglets
+      // poutres/poteaux n'ont pas de poteau choisi -> on prend le poteau par défaut,
+      // pour que l'export Archicad envoie le favori Poteau (un favori Poutre est
+      // refusé par Archicad sur un poteau)
+      const poList = catalogue.poteaux?.length ? catalogue.poteaux
+        : (catalogue.poutres?.length ? catalogue.poutres : catalogue.charpentes);
+      if (poList?.length && (!prev.poteau || !poList.some((p) => p.id === prev.poteau))) {
+        patch.poteau = defautOf(poList)?.id ?? poList[0].id;
+      }
       if (prev.moduleId && catalogue.modules?.length && !catalogue.modules.some((m) => m.id === prev.moduleId)) {
         patch.moduleId = null;
       }
@@ -2875,8 +2897,10 @@ export default function App() {
           patch.forme = formeDef.id; patch.geometrie = g; patch.pente = p1;
           patch.pente2 = g === "deuxpentes" ? p2 : p1; patch.pignon = g === "deuxpentes";
         }
-        const chDef = defOf(catalogue.charpentes);
+        const chDef = defOf(catalogue.poutres) || defOf(catalogue.charpentes);
         if (chDef && !prev.charpente) patch.charpente = chDef.id;
+        const poDef = defOf(catalogue.poteaux) || chDef;
+        if (poDef && !prev.poteau) patch.poteau = poDef.id;
         const auDef = defOf(catalogue.autonomie);
         if (auDef && !prev.autonomie) patch.autonomie = auDef.id;
         // Revêtements marqués « par défaut » (étoile de la zone Revêtements du
@@ -2993,6 +3017,8 @@ export default function App() {
       if (g.ok) {
         await refreshConfigs();
         notifier("Configuration supprimée ✓");
+      } else {
+        notifier(g.error || "Suppression impossible");
       }
     } catch { notifier("Suppression impossible"); }
   };
@@ -3217,7 +3243,7 @@ export default function App() {
                           <div>
                             <strong>{c.nom}</strong>
                             {c.description && <span className="config-date" style={{ display: "block" }}>{c.description}</span>}
-                            <span className="config-date">modifiée le {c.updated}</span>
+                            <span className="config-date">modifiée le {c.updated}{c.by ? ` — par ${c.by}${c.modele ? " (modèle)" : ""}` : ""}</span>
                           </div>
                         </div>
                         <div className="config-actions">
@@ -3427,16 +3453,29 @@ export default function App() {
             </div>
           </Rubrique>
           <Rubrique
-            titre="Type de charpente"
-            hint="Structure porteuse des côtés sans mur (côtés en charpente) : choisissez son type et son épaisseur."
+            titre="Charpente : poutre et poteau"
+            hint="Structure porteuse des côtés sans mur (côtés en charpente) : choisissez la poutre (sablière, outil Poutre) et le poteau (outil Poteau) — chacun a sa propre référence Archicad."
             ouvert={reglageOpen === "charpente"}
             onToggle={() => setReglageOpen(reglageOpen === "charpente" ? null : "charpente")}
           >
+            <p className="section-label" style={{ marginTop: 0 }}>Poutre (sablière)</p>
             <div className="choix-list">
               {(env.charpentes || []).map((c) => (
                 <Choix key={c.id}
                   checked={d.charpente === c.id}
                   onChange={() => applyCharpente(c.id)}
+                  image={c.image}
+                  nom={c.nom}
+                  detail={`ép. ${fmtCm(+(c.epaisseur ?? 0.20))} cm${+c.tarif > 0 ? ` — ${fmtEur(c.tarif)} HT` : ""}`}
+                />
+              ))}
+            </div>
+            <p className="section-label">Poteau</p>
+            <div className="choix-list">
+              {(env.poteaux || []).map((c) => (
+                <Choix key={c.id}
+                  checked={d.poteau === c.id}
+                  onChange={() => applyPoteau(c.id)}
                   image={c.image}
                   nom={c.nom}
                   detail={`ép. ${fmtCm(+(c.epaisseur ?? 0.20))} cm${+c.tarif > 0 ? ` — ${fmtEur(c.tarif)} HT` : ""}`}
@@ -3478,7 +3517,7 @@ export default function App() {
                 </div>
                 <div className="spec-row">
                   <span className="spec-k">Charpente</span>
-                  <span className="spec-v">{charpenteSel?.nom || "—"}</span>
+                  <span className="spec-v">poutre {charpenteSel?.nom || "—"} · poteau {poteauSel?.nom || "—"}</span>
                 </div>
               </div>
               )}
@@ -3895,7 +3934,10 @@ export default function App() {
               </div>
             ))}
             {plancherOpen && !!tarifs.plancherChantId && (tarifs.plancherChantArea || 0) > 0 && (
-              <div className="chiffrage-sub"><span>{chantNom(tarifs.plancherChantId)} (chants) — {fmtM2(tarifs.plancherChantArea)}</span><span>{fmtEur(tarifs.plancherChantAmount)} HT</span></div>
+              <div className="chiffrage-line">
+                <span className="chiffrage-left"><span className="chiffrage-k">Chants</span><span className="chiffrage-surf">{chantNom(tarifs.plancherChantId)} — {fmtM2(tarifs.plancherChantArea)}</span></span>
+                <span className="chiffrage-right"><span className="chiffrage-v">{fmtEur(tarifs.plancherChantAmount)} HT</span></span>
+              </div>
             )}
             <div className="chiffrage-line carac-toggle" onClick={() => setPentsBaseOpen((o) => !o)} title="Afficher / masquer le détail">
               <span className="chiffrage-left"><span className={"carac-arrow" + (pentsBaseOpen ? " open" : "")}></span><span className="chiffrage-k">Complexe de toiture</span><span className="chiffrage-surf">{fmtM2(surfaces.toitureBase)}</span></span><span className="chiffrage-v">{fmtEur(tarifs.toiture)} HT</span>

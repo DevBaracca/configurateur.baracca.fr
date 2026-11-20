@@ -150,28 +150,24 @@ include 'includes/head.html';
         </form>
         </div>
 
-        <h2>Mes configurations (<?= count($configs) ?>)</h2>
-        <?php if ($configs === []): ?>
-          <p class="auth-links">Aucune configuration enregistrée pour le moment. Lancez le <a href="configurateur.php">configurateur</a> et utilisez « Enregistrer cette configuration » dans l'onglet Export JSON.</p>
-        <?php else: ?>
-          <table class="profile-table configs-table">
+        <h2>Mes configurations (<span id="configs-count"><?= count($configs) ?></span>)</h2>
+        <div id="configs-msg" class="alert" style="display:none"></div>
+        <p class="auth-links" id="configs-empty"<?= $configs === [] ? '' : ' style="display:none"' ?>>Aucune configuration enregistrée pour le moment. Lancez le <a href="configurateur.php">configurateur</a> et utilisez « Enregistrer cette configuration » dans l'onglet Export JSON.</p>
+        <?php if ($configs !== []): ?>
+          <table class="profile-table configs-table" id="configs-table">
             <thead>
               <tr><th>Configuration</th><th>Dernière modification</th></tr>
             </thead>
             <tbody>
               <?php foreach ($configs as $config): ?>
-                <tr>
+                <tr data-config-id="<?= htmlspecialchars((string) $config['id']) ?>">
                   <td>
                     <div class="config-line">
                       <strong><?= htmlspecialchars((string) $config['nom']) ?></strong>
                       <a href="configurateur.php?config=<?= urlencode((string) $config['id']) ?>" class="btn btn-charger btn-small">Charger</a>
-                      <form method="post" action="compte.php" style="display:inline" onsubmit="return confirm('Supprimer définitivement cette configuration ?');">
-                        <input type="hidden" name="csrf" value="<?= htmlspecialchars(archicad_csrf_token()) ?>">
-                        <input type="hidden" name="config_id" value="<?= htmlspecialchars((string) $config['id']) ?>">
-                        <button type="submit" name="suppr_config" value="1" class="btn btn-danger btn-suppr btn-small" title="Supprimer" aria-label="Supprimer cette configuration">
-                          <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3.5 3.5l9 9m0-9l-9 9" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg>
-                        </button>
-                      </form>
+                      <button type="button" class="btn btn-danger btn-suppr btn-small btn-suppr-config" data-id="<?= htmlspecialchars((string) $config['id']) ?>" title="Supprimer" aria-label="Supprimer cette configuration">
+                        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3.5 3.5l9 9m0-9l-9 9" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg>
+                      </button>
                     </div>
                   </td>
                   <td><?= htmlspecialchars((string) $config['updated']) ?></td>
@@ -180,13 +176,56 @@ include 'includes/head.html';
             </tbody>
           </table>
         <?php endif; ?>
-
-        <div class="auth-actions">
-          <a href="configurateur.php" class="btn btn-cta">Lancer le configurateur</a>
-          <a href="deconnexion.php" class="btn btn-secondary">Se déconnecter</a>
-        </div>
       </div>
     </div>
   </section>
+
+  <script>
+    // Suppression d'une configuration sans rechargement de page (API JSON,
+    // comme dans le configurateur) : la ligne disparaît et le compteur est mis à jour
+    document.addEventListener('DOMContentLoaded', function () {
+      var msg = document.getElementById('configs-msg');
+      var countEl = document.getElementById('configs-count');
+      var table = document.getElementById('configs-table');
+      var emptyP = document.getElementById('configs-empty');
+      var showMsg = function (cls, text) {
+        if (!msg) return;
+        msg.className = 'alert ' + cls;
+        msg.textContent = text;
+        msg.style.display = '';
+      };
+      document.querySelectorAll('.btn-suppr-config').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+          var id = btn.getAttribute('data-id');
+          btn.disabled = true;
+          try {
+            var r = await fetch('php/api_configurations.php', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'delete', id: id })
+            });
+            var g = await r.json();
+            if (g.ok) {
+              var sel = 'tr[data-config-id="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]';
+              var row = table ? table.querySelector(sel) : null;
+              if (row) row.remove();
+              if (countEl) countEl.textContent = String(Math.max(0, (parseInt(countEl.textContent, 10) || 0) - 1));
+              if (table && !table.querySelector('tbody tr')) {
+                table.style.display = 'none';
+                if (emptyP) emptyP.style.display = '';
+              }
+              showMsg('alert-success', 'Configuration supprimée.');
+            } else {
+              showMsg('alert-error', g.error || 'Suppression impossible.');
+              btn.disabled = false;
+            }
+          } catch (e) {
+            showMsg('alert-error', 'Suppression impossible.');
+            btn.disabled = false;
+          }
+        });
+      });
+    });
+  </script>
 
 <?php include 'includes/footer.php'; ?>

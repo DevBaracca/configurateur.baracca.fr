@@ -4,16 +4,19 @@ require_once __DIR__ . '/auth.php';
 $currentPage = basename($_SERVER['PHP_SELF']);
 if (!isset($pageTitle)) $pageTitle = 'Baracca | Configurateur de modules pour Archicad';
 if (!isset($pageDescription)) $pageDescription = 'Baracca - Configurateur de modules d\'habitation en ossature bois : concevez votre module en ligne et exportez les données vers Archicad.';
-// Lien de compte selon l'état de connexion (espace client)
-$isLoggedIn = archicad_is_logged_in();
-// CTA du header selon la page courante
-if ($currentPage === 'configurateur.php') {
-  $ctaHref = 'index.php';
-  $ctaLabel = 'Retour à l\'accueil';
-} else {
-  $ctaHref = 'configurateur.php';
-  $ctaLabel = 'Lancer le configurateur';
+// Compte effectif (compte client, ou session administrateur) pour le menu de la barre supérieure
+$accountUser = archicad_api_user();
+$accountName = '';
+if ($accountUser !== null) {
+  if (!empty($accountUser['admin'])) {
+    $accountName = (string) ($accountUser['nom'] ?? 'Admin');
+  } else {
+    $accountName = trim(((string) ($accountUser['prenom'] ?? '')) . ' ' . ((string) ($accountUser['nom'] ?? '')));
+    if ($accountName === '') $accountName = (string) ($accountUser['email'] ?? 'Mon compte');
+  }
 }
+// Session client seule (un admin sans compte client n'a pas de page « Mon compte »)
+$isLoggedIn = archicad_is_logged_in();
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -52,11 +55,6 @@ if ($currentPage === 'configurateur.php') {
         <ul class="nav-links">
           <li><a href="index.php"<?php echo ($currentPage === 'index.php') ? ' class="active"' : ''; ?>>Accueil</a></li>
           <li><a href="configurateur.php"<?php echo ($currentPage === 'configurateur.php') ? ' class="active"' : ''; ?>>Configurateur</a></li>
-          <?php if ($isLoggedIn): ?>
-            <li><a href="compte.php"<?php echo ($currentPage === 'compte.php') ? ' class="active"' : ''; ?>>Mon compte</a></li>
-          <?php else: ?>
-            <li><a href="connexion.php"<?php echo in_array($currentPage, ['connexion.php', 'inscription.php'], true) ? ' class="active"' : ''; ?>>Connexion</a></li>
-          <?php endif; ?>
         </ul>
         <div class="nav-actions">
           <a href="admin/index.php" class="nav-admin" title="Administration" aria-label="Administration">
@@ -65,7 +63,22 @@ if ($currentPage === 'configurateur.php') {
               <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
             </svg>
           </a>
-          <a href="<?php echo $ctaHref; ?>" class="btn btn-primary nav-cta"><?php echo $ctaLabel; ?></a>
+          <?php if ($accountUser !== null): ?>
+            <div class="account-menu">
+              <button type="button" class="account-btn" id="account-btn" aria-haspopup="true" aria-expanded="false">
+                <span class="account-name"><?= htmlspecialchars($accountName) ?></span>
+                <svg class="account-caret" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </button>
+              <div class="account-dropdown hidden" id="account-dropdown">
+                <?php if ($isLoggedIn): ?>
+                  <a href="compte.php"<?php echo ($currentPage === 'compte.php') ? ' class="active"' : ''; ?>>Mon compte</a>
+                <?php endif; ?>
+                <a href="deconnexion.php">Se déconnecter</a>
+              </div>
+            </div>
+          <?php else: ?>
+            <a href="connexion.php" class="btn btn-primary nav-cta<?php echo in_array($currentPage, ['connexion.php', 'inscription.php'], true) ? ' active' : ''; ?>">Connexion</a>
+          <?php endif; ?>
           <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Menu">
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="3" y1="12" x2="21" y2="12"></line>
@@ -81,9 +94,7 @@ if ($currentPage === 'configurateur.php') {
         <ul>
           <li><a href="index.php">Accueil</a></li>
           <li><a href="configurateur.php">Configurateur</a></li>
-          <?php if ($isLoggedIn): ?>
-            <li><a href="compte.php">Mon compte</a></li>
-          <?php else: ?>
+          <?php if ($accountUser === null): ?>
             <li><a href="connexion.php">Connexion</a></li>
           <?php endif; ?>
         </ul>

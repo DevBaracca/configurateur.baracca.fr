@@ -4,7 +4,7 @@
  * Gestion des catalogues du configurateur : menuiseries (baies vitrées,
  * fenêtres, portes — avec visuel et référence Archicad), modèles de modules
  * (géométrie prédéfinie uniquement), isolations (type de mur + plancher +
- * toiture), formes de toiture (géométrie, pentes), charpentes, enveloppe
+ * toiture), formes de toiture (géométrie, pentes), poutres/poteaux, enveloppe
  * (murs, planchers, toitures) et revêtements en quatre onglets : « Extérieur »
  * (surfaces — habillage des murs), « Intérieur » (murs + sous-face de toiture),
  * « Toiture » (couvertures, par pent) et « Plancher » (rev_plancher —
@@ -26,7 +26,7 @@ require_once __DIR__ . '/../includes/configurations.php';
 require_once __DIR__ . '/../includes/acces.php';
 
 $section = (string) ($_GET['section'] ?? 'modules');
-// Onglets : Structure (Modules, Isolation, Formes, Autonomie, Aménagements), Catalogue (Charpentes,
+// Onglets : Structure (Modules, Isolation, Formes, Autonomie, Aménagements), Catalogue (Poutres, Poteaux,
 // Murs, Planchers, Complexe de toiture, Ouvrants, Fenêtres de toit, systèmes Aut., Equipements),
 // Revêtements (Extérieur = surfaces, Intérieur, Toiture = couvertures, Plancher = rev_plancher)
 // et Modèles (configurations « modèles » enregistrées par les administrateurs)
@@ -35,9 +35,13 @@ if ($section === 'enveloppe') {
     $sous0 = (string) ($_GET['sous'] ?? '');
     $section = in_array($sous0, ['murs', 'planchers', 'toitures', 'surfaces', 'interieurs', 'couvertures', 'rev_plancher'], true) ? $sous0 : 'murs';
 }
-if (!in_array($section, ['modules', 'isolation', 'formes', 'charpentes', 'autonomie', 'amenagements', 'promotions', 'systemes_aut', 'equipements', 'fenetres_toit', 'murs', 'planchers', 'toitures', 'menuiseries', 'surfaces', 'interieurs', 'couvertures', 'rev_plancher', 'modeles'], true)) {
+if (!in_array($section, ['modules', 'isolation', 'formes', 'poutres', 'poteaux', 'autonomie', 'amenagements', 'promotions', 'systemes_aut', 'equipements', 'fenetres_toit', 'murs', 'planchers', 'toitures', 'menuiseries', 'surfaces', 'interieurs', 'couvertures', 'rev_plancher', 'modeles'], true)) {
     $section = 'modules';
 }
+// Onglets « charpente » éclatés en deux catalogues distincts (une seule
+// référence Archicad par élément) : poutres (sablières, outil Poutre) et
+// poteaux (outil Poteau). $charpKind = kind actif parmi les deux, sinon null.
+$charpKind = in_array($section, ['poutres', 'poteaux'], true) ? $section : null;
 
 // Garde-fou : chaque section du configurateur est une rubrique protégée
 // (un vendeur/partenaire n'a accès qu'aux sections cochées dans sa fiche)
@@ -49,7 +53,7 @@ archicad_bo_require('configurateur:' . $section);
 // l'élément Archicad correspondant est indispensable à l'import du JSON.
 $catRefKind = in_array($section, cat_enveloppe_kinds(), true)
     ? 'composite'
-    : (in_array($section, ['menuiseries', 'fenetres_toit', 'systemes_aut', 'equipements', 'charpentes'], true) ? 'favori' : '');
+    : (in_array($section, ['menuiseries', 'fenetres_toit', 'systemes_aut', 'equipements', 'poutres', 'poteaux'], true) ? 'favori' : '');
 $refBadge = $catRefKind === 'composite'
     ? ' <span class="admin-ref-badge composite" title="Structure composite Archicad (pile de couches) — indispensable &#224; l&#39;import JSON">structure composite</span>'
     : ($catRefKind === 'favori'
@@ -148,7 +152,7 @@ function cat_icon_delete(): string
 }
 
 // Enregistre le drapeau « par défaut » d'une rubrique (modules, isolation,
-// formes, charpentes) : un seul élément par défaut à la fois
+// formes, poutres, poteaux) : un seul élément par défaut à la fois
 function cat_save_defaut(string $kind, array $item): void
 {
     // La case « défaut » n'est plus dans les formulaires (étoile dans la liste) :
@@ -342,12 +346,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // ----- Modèles de modules (géométrie uniquement) -----
     if ($action === 'set_defaut') {
         // Définit l'élément comme « par défaut » de sa rubrique (un seul à la
-        // fois) : zones Structure (modules, isolation, formes, charpentes,
+        // fois) : zones Structure (modules, isolation, formes, poutres, poteaux,
         // autonomie, aménagements) et Revêtements (surfaces, interieurs,
         // couvertures, rev_plancher)
         $sous = (string) ($_POST['sous'] ?? '');
         $id = trim((string) ($_POST['id'] ?? ''));
-        if (in_array($sous, ['modules', 'isolation', 'formes', 'charpentes', 'autonomie', 'amenagements', 'surfaces', 'interieurs', 'couvertures', 'rev_plancher'], true) && $id !== '') {
+        if (in_array($sous, ['modules', 'isolation', 'formes', 'poutres', 'poteaux', 'autonomie', 'amenagements', 'surfaces', 'interieurs', 'couvertures', 'rev_plancher'], true) && $id !== '') {
             archicad_catalogue_set_default($sous, $id);
         }
         cat_redirect($section, 'saved');
@@ -775,17 +779,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         cat_redirect('formes', 'deleted');
     }
 
-    // ----- Charpentes (visuel, nom, épaisseur, couleur, coût unitaire, référence Archicad) -----
-    if ($action === 'save_charpente') {
+    // ----- Poutres / poteaux (visuel, nom, épaisseur, couleur, coût unitaire, référence Archicad) -----
+    // Deux onglets distincts (kind « poutres » = sablières, « poteaux") : UNE
+    // seule référence Archicad par élément (outil Poutre ou outil Poteau).
+    if ($charpKind !== null && $action === 'save_charpente') {
+        $kind = $charpKind;
         $id = trim((string) ($_POST['id'] ?? ''));
         $nom = trim((string) ($_POST['nom'] ?? ''));
         // Saisie en cm (précision mm) — stockage en m
         $epaisseur = round(cat_num('epaisseur') / 100, 3);
         $tarif = round(cat_num('tarif'), 2);
         if ($nom === '' || $epaisseur <= 0) {
-            cat_redirect('charpentes', 'invalid');
+            cat_redirect($section, 'invalid');
         }
-        $item = archicad_catalogue_upsert('charpentes', [
+        $item = archicad_catalogue_upsert($kind, [
             'nom' => $nom,
             'epaisseur' => $epaisseur,
             'rgb' => [
@@ -802,12 +809,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($fs !== null && is_file($fs)) {
                 unlink($fs);
             }
-            archicad_catalogue_upsert('charpentes', ['image' => ''], (string) $item['id']);
+            archicad_catalogue_upsert($kind, ['image' => ''], (string) $item['id']);
         }
         if (isset($_FILES['image']) && is_array($_FILES['image'])) {
-            $stored = archicad_catalogue_store_image($_FILES['image'], (string) $item['id'], 'charpentes');
+            $stored = archicad_catalogue_store_image($_FILES['image'], (string) $item['id'], $kind);
             if (!$stored['ok']) {
-                cat_redirect('charpentes', 'image', (string) $stored['error']);
+                cat_redirect($section, 'image', (string) $stored['error']);
             }
             $old = (string) ($item['image'] ?? '');
             if ($old !== '' && $old !== $stored['webPath']) {
@@ -816,14 +823,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     unlink($fs);
                 }
             }
-            archicad_catalogue_upsert('charpentes', ['image' => (string) $stored['webPath']], (string) $item['id']);
+            archicad_catalogue_upsert($kind, ['image' => (string) $stored['webPath']], (string) $item['id']);
         }
-        cat_save_defaut('charpentes', $item);
-        cat_redirect('charpentes', 'saved');
+        cat_save_defaut($kind, $item);
+        cat_redirect($section, 'saved');
     }
-    if ($action === 'delete_charpente') {
-        archicad_catalogue_delete('charpentes', trim((string) ($_POST['id'] ?? '')));
-        cat_redirect('charpentes', 'deleted');
+    if ($charpKind !== null && $action === 'delete_charpente') {
+        archicad_catalogue_delete($charpKind, trim((string) ($_POST['id'] ?? '')));
+        cat_redirect($section, 'deleted');
     }
 
     // ----- Enveloppe (murs, planchers, surfaces, toitures) -----
@@ -949,7 +956,8 @@ $menuiseries = archicad_load_catalogue('menuiseries');
 $modules = archicad_load_catalogue('modules');
 $isolations = archicad_load_catalogue('isolation');
 $formes = archicad_load_catalogue('formes');
-$charpentes = archicad_load_catalogue('charpentes');
+$poutres = archicad_load_catalogue('poutres');   // sablières (outil Poutre)
+$poteaux = archicad_load_catalogue('poteaux');   // poteaux (outil Poteau)
 $systemesAut = archicad_load_catalogue('systemes_aut');
 $autonomies = archicad_load_catalogue('autonomie');
 $equipements = archicad_load_catalogue('equipements');
@@ -1002,8 +1010,9 @@ if (($editId = trim((string) ($_GET['edit'] ?? ''))) !== '') {
         $editIsolation = archicad_catalogue_find('isolation', $editId);
     } elseif ($section === 'formes') {
         $editForme = archicad_catalogue_find('formes', $editId);
-    } elseif ($section === 'charpentes') {
-        $editCharpente = archicad_catalogue_find('charpentes', $editId);
+    } elseif ($charpKind !== null) {
+        // édition d'un élément poutre ou poteau (onglet actif)
+        $editCharpente = archicad_catalogue_find($charpKind, $editId);
     } elseif ($section === 'systemes_aut') {
         $editSystemeAut = archicad_catalogue_find('systemes_aut', $editId);
     } elseif ($section === 'equipements') {
@@ -1039,7 +1048,7 @@ include __DIR__ . '/../includes/admin-head.php';
 
 <?php
 // Cartes façon client : Structure (Modules, Isolation, Formes, Autonomie,
-// Aménagements), Catalogue (Charpentes, Murs, Planchers, Complexe de toiture,
+// Aménagements), Catalogue (Poutres, Poteaux, Murs, Planchers, Complexe de toiture,
 // Ouvrants, Fenêtres de toit, systèmes Aut., Equipements),
 // Revêtements (Extérieur, Intérieur, Toiture, Plancher).
 // Chaque carte porte ses sous-onglets ; la rubrique active s'ouvre dans sa carte.
@@ -1052,7 +1061,8 @@ $groupes = [
         ['amenagements', 'Aménagements', count($amenagements)],
     ]],
     'catalogue' => ['label' => 'Catalogue', 'sections' => [
-        ['charpentes', 'Charpentes', count($charpentes)],
+        ['poutres', 'Poutres', count($poutres)],
+        ['poteaux', 'Poteaux', count($poteaux)],
         ['murs', 'Murs', count($murs)],
         ['planchers', 'Planchers', count($planchers)],
         ['toitures', 'Complexe de toiture', count($toitures)],
@@ -1073,7 +1083,7 @@ $groupes = [
 ];
 $groupeOf = [
     'modules' => 'structure', 'isolation' => 'structure', 'formes' => 'structure', 'autonomie' => 'structure', 'amenagements' => 'structure', 'promotions' => 'structure',
-    'charpentes' => 'catalogue', 'murs' => 'catalogue', 'planchers' => 'catalogue',
+    'poutres' => 'catalogue', 'poteaux' => 'catalogue', 'murs' => 'catalogue', 'planchers' => 'catalogue',
     'toitures' => 'catalogue', 'menuiseries' => 'catalogue', 'fenetres_toit' => 'catalogue', 'systemes_aut' => 'catalogue', 'equipements' => 'catalogue',
     'surfaces' => 'surfaces', 'interieurs' => 'surfaces', 'couvertures' => 'surfaces', 'rev_plancher' => 'surfaces',
     'modeles' => 'modeles',
@@ -2177,19 +2187,27 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
     </div>
     <?php modal_close(); endif; ?>
 
-    <?php elseif ($section === 'charpentes'): ?>
+    <?php elseif ($charpKind !== null): ?>
+    <?php
+    // Onglet actif : « poutres » (sablières) ou « poteaux » — même liste, un seul
+    // catalogue par onglet, UNE référence Archicad par élément.
+    $chItems = $charpKind === 'poteaux' ? $poteaux : $poutres;
+    $chLabel = $charpKind === 'poteaux' ? 'Poteaux' : 'Poutres';
+    $chSing = $charpKind === 'poteaux' ? 'poteau' : 'poutre';
+    $chUrl = 'configurateur.php?section=' . $charpKind;
+    ?>
     <div class="admin-card">
-      <h2>Charpentes (<?= count($charpentes) ?>) <?= cat_btn_add('configurateur.php?section=charpentes&new=1', 'Ajouter une charpente') ?></h2>
-      <p class="admin-hint">Charpentes (à l'identique des ouvrants) : visuel, nom, épaisseur, couleur, coût unitaire et référence Archicad.</p>
-      <?php if ($charpentes === []): ?>
-        <p class="admin-hint">Aucune charpente dans le catalogue pour le moment.</p>
+      <h2><?= $chLabel ?> (<?= count($chItems) ?>) <?= cat_btn_add($chUrl . '&new=1', 'Ajouter ' . ($charpKind === 'poteaux' ? 'un poteau' : 'une poutre')) ?></h2>
+      <p class="admin-hint"><?= $chLabel ?> (à l'identique des ouvrants) : visuel, nom, épaisseur, couleur, coût unitaire et référence Archicad (<?= $charpKind === 'poteaux' ? 'outil Poteau' : 'outil Poutre' ?>).</p>
+      <?php if ($chItems === []): ?>
+        <p class="admin-hint">Aucun<?= $charpKind === 'poteaux' ? ' poteau' : ' poutre' ?> dans le catalogue pour le moment.</p>
       <?php else: ?>
         <table class="admin-table">
           <thead>
             <tr><th>Visuel</th><th>Nom</th><th>Épaisseur</th><th>Couleur</th><th>Référence Archicad<?= $refBadge ?></th><th>Actions</th></tr>
           </thead>
           <tbody>
-            <?php foreach ($charpentes as $ch): $rgbC = $ch['rgb'] ?? [140, 107, 89]; ?>
+            <?php foreach ($chItems as $ch): $rgbC = $ch['rgb'] ?? [140, 107, 89]; ?>
               <tr>
                 <td><?= cat_thumb($ch) ?></td>
                 <td><strong><?= htmlspecialchars((string) $ch['nom']) ?></strong></td>
@@ -2197,9 +2215,9 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
                 <td><span class="admin-color-swatch" style="background-color: <?= cat_hex($rgbC) ?>;"></span> <?= cat_hex($rgbC) ?></td>
                 <td><?= ($ch['favori'] ?? '') !== '' ? htmlspecialchars((string) $ch['favori']) : '—' ?></td>
                 <td class="admin-actions">
-                  <?= cat_action_defaut('configurateur.php?section=charpentes', $csrf, 'charpentes', (string) $ch['id'], !empty($ch['defaut'])) ?>
-                  <?= cat_action_edit('configurateur.php?section=charpentes&edit=' . urlencode((string) $ch['id'])) ?>
-                  <?= cat_action_delete('configurateur.php?section=charpentes', $csrf, 'delete_charpente', (string) $ch['id'], 'Supprimer cette charpente du catalogue ?') ?>
+                  <?= cat_action_defaut($chUrl, $csrf, $charpKind, (string) $ch['id'], !empty($ch['defaut'])) ?>
+                  <?= cat_action_edit($chUrl . '&edit=' . urlencode((string) $ch['id'])) ?>
+                  <?= cat_action_delete($chUrl, $csrf, 'delete_charpente', (string) $ch['id'], 'Supprimer ' . $chSing . ' du catalogue ?') ?>
                 </td>
               </tr>
             <?php endforeach; ?>
@@ -2207,10 +2225,10 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
         </table>
       <?php endif; ?>
     </div>
-    <?php if ($editCharpente || $new): modal_open('configurateur.php?section=charpentes'); ?>
+    <?php if ($editCharpente || $new): modal_open($chUrl); ?>
     <div class="admin-card">
-      <h2><?= $editCharpente ? 'Modifier : ' . htmlspecialchars((string) $editCharpente['nom']) : 'Ajouter une charpente' ?></h2>
-      <form method="post" action="configurateur.php?section=charpentes" enctype="multipart/form-data">
+      <h2><?= $editCharpente ? 'Modifier : ' . htmlspecialchars((string) $editCharpente['nom']) : ($charpKind === 'poteaux' ? 'Ajouter un poteau' : 'Ajouter une poutre') ?></h2>
+      <form method="post" action="<?= $chUrl ?>" enctype="multipart/form-data">
         <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
         <input type="hidden" name="action" value="save_charpente">
         <input type="hidden" name="id" value="<?= htmlspecialchars((string) ($editCharpente['id'] ?? '')) ?>">
@@ -2227,7 +2245,7 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
         <div class="modal-row">
           <div class="admin-form-row">
             <label for="ch-nom">Nom</label>
-            <input type="text" id="ch-nom" name="nom" required value="<?= htmlspecialchars((string) ($editCharpente['nom'] ?? '')) ?>" placeholder="Charpente traditionnelle">
+            <input type="text" id="ch-nom" name="nom" required value="<?= htmlspecialchars((string) ($editCharpente['nom'] ?? '')) ?>" placeholder="<?= $charpKind === 'poteaux' ? 'Poteau traditionnel' : 'Poutre traditionnelle' ?>">
           </div>
         </div>
         <div class="modal-row">
@@ -2263,13 +2281,13 @@ $groupeActif = $groupeOf[$section] ?? 'structure';
         <hr class="admin-sep">
         <div class="modal-row">
           <div class="admin-form-row">
-            <label for="ch-favori">Référence Archicad<?= $refBadge ?></label>
-            <input type="text" id="ch-favori" name="favori" value="<?= htmlspecialchars((string) ($editCharpente['favori'] ?? '')) ?>" placeholder="Nom de la référence Archicad (ex. Baracca — Charpente), vide = aucune">
+            <label for="ch-favori">Référence Archicad (<?= $charpKind === 'poteaux' ? 'outil Poteau' : 'outil Poutre / sablière' ?>)<?= $refBadge ?></label>
+            <input type="text" id="ch-favori" name="favori" value="<?= htmlspecialchars((string) ($editCharpente['favori'] ?? '')) ?>" placeholder="Nom de la référence Archicad (ex. <?= $charpKind === 'poteaux' ? 'Baracca — Poteau 15×15' : 'Baracca — Poutre 15×15' ?>), vide = aucune">
           </div>
         </div>
         <div class="admin-actions">
           <button type="submit" class="btn btn-cta">Enregistrer</button>
-          <a href="configurateur.php?section=charpentes" class="btn btn-secondary">Annuler</a>
+          <a href="<?= $chUrl ?>" class="btn btn-secondary">Annuler</a>
         </div>
       </form>
     </div>

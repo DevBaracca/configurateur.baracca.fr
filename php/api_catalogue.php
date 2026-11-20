@@ -24,7 +24,9 @@ echo json_encode([
         'autonomie' => archicad_load_catalogue('autonomie'),       // packs autonomie (zone Structure)
         'amenagements' => archicad_load_catalogue('amenagements'), // packs aménagements = listes d'équipements (zone Structure)
         'formes' => archicad_load_catalogue('formes'),
-        'charpentes' => archicad_load_catalogue('charpentes'),
+        'charpentes' => archicad_load_catalogue('charpentes'), // legacy (avant découpe poutres/poteaux)
+        'poutres' => archicad_load_catalogue('poutres'),         // sablières (outil Poutre)
+        'poteaux' => archicad_load_catalogue('poteaux'),         // poteaux (outil Poteau)
         'enveloppe' => [
             'murs' => archicad_load_catalogue('murs'),
             'planchers' => archicad_load_catalogue('planchers'),

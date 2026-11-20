@@ -673,52 +673,94 @@ td.admin-actions > * + * {
   letter-spacing: 0.04em;
 }
 
-/* Carte interactive des départements (zone géographique vendeur/partenaire) */
-.dept-carte {
+/* Carte interactive des départements de France métropolitaine (SVG cliquable,
+   zone géographique vendeur/partenaire) — chaque département = un <g data-dept> */
+.dept-carte-svg {
   position: relative;
   border: 1px solid var(--gray-border);
   border-radius: var(--border-radius);
   background: var(--gray-light);
   margin: var(--spacing-sm) 0;
-  max-width: 100%;
-  overflow: auto;
+  padding: var(--spacing-sm);
+  max-width: 520px;
 }
-.dept-tile {
-  position: absolute;
-  width: 38px;
-  height: 38px;
-}
-.dept-tile input {
-  position: absolute;
-  inset: 0;
+.dept-france {
+  display: block;
   width: 100%;
-  height: 100%;
-  margin: 0;
-  opacity: 0;
+  height: auto;
+}
+.dept-g {
   cursor: pointer;
+  outline: none;
 }
-.dept-tile span {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  border: 1px solid var(--gray-border);
-  border-radius: 4px;
-  background: var(--white);
-  color: var(--gray);
-  font-size: 0.62rem;
+.dept-g path {
+  fill: var(--white);
+  stroke: var(--gray-border);
+  stroke-width: 1;
+  transition: fill 0.15s ease;
+}
+.dept-g:hover path,
+.dept-g:focus-visible path {
+  fill: #d6d3d1;
+}
+.dept-g:focus-visible path {
+  stroke: var(--primary);
+  stroke-width: 2;
+}
+/* département déjà attribué à un autre compte staff : rouge clair (le vert .sel prime) */
+.dept-g.pris path {
+  fill: #fecaca;
+  stroke: #f87171;
+}
+.dept-g.pris:hover path,
+.dept-g.pris:focus-visible path {
+  fill: #fca5a5;
+}
+.dept-g.sel path {
+  fill: var(--primary);
+  stroke: var(--primary-dark);
+}
+.dept-g text {
+  font-size: 9px;
   font-weight: 700;
+  fill: var(--gray);
+  text-anchor: middle;
+  dominant-baseline: central;
   pointer-events: none;
 }
-.dept-tile input:checked + span {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: var(--white);
+.dept-g.sel text {
+  fill: var(--white);
 }
-.dept-tile input:focus-visible + span {
-  outline: 2px solid var(--primary);
-  outline-offset: 1px;
+/* cases à cocher de la carte : masquées, pilotées par les clics sur le SVG */
+.dept-check {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+/* légende de la carte des départements */
+.dept-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: var(--spacing-sm) 0 0;
+}
+.dept-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid var(--gray-border);
+}
+.dept-swatch-sel {
+  background: var(--primary);
+  border-color: var(--primary-dark);
+}
+.dept-swatch-pris {
+  background: #fecaca;
+  border-color: #f87171;
 }
 
 /* Arborescence des accès (fiche vendeur/partenaire) */

@@ -41,6 +41,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $password = (string) ($_POST['password'] ?? '');
         $confirmation = (string) ($_POST['confirmation'] ?? '');
         $acces = array_map('strval', (array) ($_POST['acces'] ?? []));
+        // Zone géographique : cases departements[] de la carte, filtrées sur les codes connus
+        $departements = array_values(array_intersect(
+            array_map('strval', (array) ($_POST['departements'] ?? [])),
+            array_map('strval', array_keys(archicad_departements()))
+        ));
         if ($fields['email'] === '' || !filter_var($fields['email'], FILTER_VALIDATE_EMAIL)) {
             $message = ['error', "L'email est obligatoire et doit être valide."];
         } elseif (strlen($password) < 8) {
@@ -50,7 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif (archicad_find_user_by_email($fields['email']) !== null) {
             $message = ['error', 'Un compte existe déjà avec cet email.'];
         } else {
-            $created = archicad_add_staff($fields, $password, $role, $acces);
+            $created = archicad_add_staff($fields, $password, $role, $acces, $departements);
             if ($created !== false) {
                 header('Location: staff.php?role=' . urlencode($role) . '&id=' . urlencode((string) $created['id']) . '&success=created');
                 exit;
@@ -63,11 +68,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $fields[$f] = trim((string) ($_POST[$f] ?? ''));
         }
         $acces = array_map('strval', (array) ($_POST['acces'] ?? []));
-        $updated = archicad_update_staff($id, $fields, $role, $acces);
+        // Zone géographique : cases departements[] de la carte, filtrées sur les codes connus
+        $departements = array_values(array_intersect(
+            array_map('strval', (array) ($_POST['departements'] ?? [])),
+            array_map('strval', array_keys(archicad_departements()))
+        ));
+        $updated = archicad_update_staff($id, $fields, $role, $acces, $departements);
         if ($updated === false) {
             $message = ['error', "Informations non enregistrées : email invalide ou déjà utilisé par un autre compte."];
         } else {
-            $message = ['success', 'Fiche mise à jour (profil + accès).'];
+            $message = ['success', 'Fiche mise à jour (profil + accès + zone géographique).'];
             $id = (string) $updated['id'];
         }
     } elseif (isset($_POST['reinit'])) {
@@ -101,15 +111,19 @@ if ($id !== '') {
 }
 $success = (string) ($_GET['success'] ?? '');
 
-// Résumé des accès cochés (labels des nœuds de premier niveau)
+// Résumé des accès cochés (labels de tous les nœuds cochés, à tous les niveaux)
 function staff_acces_resume(array $acces): string
 {
     $labels = [];
-    foreach (archicad_acces_tree() as $n) {
-        if (in_array((string) $n['key'], $acces, true)) {
-            $labels[] = (string) $n['label'];
+    $walk = function (array $nodes) use (&$walk, &$labels, $acces) {
+        foreach ($nodes as $n) {
+            if (in_array((string) $n['key'], $acces, true)) {
+                $labels[] = (string) $n['label'];
+            }
+            $walk($n['children']);
         }
-    }
+    };
+    $walk(archicad_acces_tree());
     return $labels !== [] ? implode(', ', $labels) : '—';
 }
 
@@ -178,7 +192,7 @@ include __DIR__ . '/../includes/admin-head.php';
         </div>
         <fieldset class="admin-acces">
           <legend>Accès au back-office (arborescence du site)</legend>
-          <p class="admin-hint">Cocher un nœud autorise toutes ses sous-rubriques. Le configurateur en ligne reste accessible dans tous les cas.</p>
+          <p class="admin-hint">Cocher un nœud autorise toute la rubrique. Si des sous-rubriques sont cochées en plus, seules celles cochées sont accessibles sous ce nœud. Le configurateur en ligne reste accessible dans tous les cas.</p>
           <?php foreach (archicad_acces_tree() as $n): ?>
             <?php archicad_acces_checkbox($n, $accesFiche); ?>
           <?php endforeach; ?>
@@ -229,7 +243,7 @@ include __DIR__ . '/../includes/admin-head.php';
         </div>
         <fieldset class="admin-acces">
           <legend>Accès au back-office (arborescence du site)</legend>
-          <p class="admin-hint">Cocher un nœud autorise toutes ses sous-rubriques. Le configurateur en ligne reste accessible dans tous les cas.</p>
+          <p class="admin-hint">Cocher un nœud autorise toute la rubrique. Si des sous-rubriques sont cochées en plus, seules celles cochées sont accessibles sous ce nœud. Le configurateur en ligne reste accessible dans tous les cas.</p>
           <?php foreach (archicad_acces_tree() as $n): ?>
             <?php archicad_acces_checkbox($n, []); ?>
           <?php endforeach; ?>

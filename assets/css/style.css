@@ -605,6 +605,81 @@ img, picture, video, canvas, svg {
   border-color: var(--primary);
 }
 
+/* Menu compte (utilisateur connecté) dans la barre supérieure */
+.account-menu {
+  position: relative;
+}
+
+.account-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: var(--white);
+  border: 1px solid var(--gray-border);
+  border-radius: var(--border-radius);
+  padding: 8px 12px;
+  font-weight: 600;
+  font-size: var(--font-size-body);
+  color: var(--black);
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+
+.account-btn:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.account-name {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-caret {
+  transition: var(--transition);
+  flex-shrink: 0;
+}
+
+.account-btn[aria-expanded="true"] .account-caret {
+  transform: rotate(180deg);
+}
+
+.account-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 180px;
+  background-color: var(--white);
+  border: 1px solid var(--gray-border);
+  border-radius: var(--border-radius);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+  padding: 6px;
+  z-index: var(--z-modal);
+  display: flex;
+  flex-direction: column;
+}
+
+.account-dropdown.hidden {
+  display: none;
+}
+
+.account-dropdown a {
+  display: block;
+  padding: 10px 12px;
+  font-weight: 500;
+  color: var(--black);
+  border-radius: calc(var(--border-radius) - 4px);
+}
+
+.account-dropdown a:hover,
+.account-dropdown a.active {
+  background-color: var(--gray-light);
+  color: var(--primary);
+}
+
 .mobile-menu {
   position: absolute;
   top: 100%;
@@ -1673,9 +1748,17 @@ img, picture, video, canvas, svg {
   .nav-links {
     display: none;
   }
-  
+
   .mobile-menu-btn {
     display: block;
+  }
+
+  .account-name {
+    max-width: 110px;
+  }
+
+  .account-btn {
+    padding: 8px 10px;
   }
   
   .hero {

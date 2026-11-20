@@ -1,7 +1,32 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# BARACCA-IMPORT v2.59 — vérifiez la présence de cette ligne : elle prouve
+# BARACCA-IMPORT v2.64 — vérifiez la présence de cette ligne : elle prouve
 # que vous exécutez bien la dernière version du script.
+# v2.64 : bandes de chant — le favori envoyé à CreateColumns est à nouveau la
+#   « Référence Archicad » DU REVÊTEMENT DE CHANT choisi (un favori Poteau de ce
+#   nom doit exister dans le gabarit, ex. BARACCA-PLANCHER-STRATIFIE créé en
+#   favori Poteau), à défaut le favori poteau de l'export. Envoyé à la création
+#   seulement (géométrie explicite prioritaire), sans réapplication après coup.
+# v2.63 : diagnostic [diag] : affiche l'élément « poteau » brut de l'export et le
+#   favori retenu pour CreateColumns (pour comprendre pourquoi aucun favori
+#   poteau n'est appliqué : export sans poteau, favori vide, ou favori = poutre).
+# v2.62 : favori des POTEAUX (CreateColumns) = favori de l'élément « poteau » de
+#   l'export, SANS repli sur le favori poutre : un favori Poutre (outil Beam) est
+#   refusé par Archicad sur une colonne (vieux exports avec repli poutre ->
+#   aucun favori envoyé aux colonnes). Bandes de chant : la « Référence Archicad »
+#   du revêtement de chant est un composite, plus envoyée à CreateColumns (refusé)
+#   ; favori poteau envoyé à la création seulement, sans réapplication après coup
+#   (sinon le favori réinitialiserait la section de la bande).
+# v2.61 : le favori BAIELIBRE est RENVOYÉ à la création des trous dans les
+#   REVÊTEMENTS DE MUR. Sans lui, CreateWindows crée une vraie fenêtre vitrée
+#   superposée à l'ouvrant (3 fenêtres l'une sur l'autre, test v2.60) : c'est le
+#   favori qui donne au trou son type « baie libre » (sans menuiserie). Les champs
+#   width/height/sillHeight explicites priment sur le favori À LA CRÉATION (probe
+#   v2.59). Le favori est ensuite réappliqué avec keepFields=KEEP_FIELDS_OUVERTURE
+#   (cas où Tapir l'aurait refusé à la création) SANS écraser les dimensions —
+#   c'est la réapplication sans keepFields de v2.59 qui ramenait le trou à 106,5 cm.
+#   Les trous de lucarnes restent SANS favori (v2.48) : un skylight est nativement
+#   une ouverture dans la peau de toiture, width/height explicites suffisent.
 # v2.59 : avec allège, favori (ouvrant ET BAIELIBRE) envoyé À LA CRÉATION avec
 #   sillHeight (champs explicites > favori) et PLUS réappliqué après coup.
 #   Probes 5d/5e : favori+sillHeight à la création, favori sans keepFields.
@@ -131,7 +156,8 @@
 # au-dessus du plancher ; toiture : complexe à H, sous-face à H-ep, couverture
 # à H+ep_complexe (seule avec débord). Ouvertures (fenêtres/portes, fenêtres de
 # toit) sur l'élément de référence + BAIES LIBRES équivalentes dans les couches
-# de revêtement (FAVORI_BAIE_LIBRE).
+# de revêtement (favori BAIELIBRE à la création depuis v2.61 + réapplication avec
+# keepFields width/height/sillHeight : type « baie libre » garanti, dimensions préservées).
 # v2.25 : éléments en PILES DE COUCHES (champ « couches » de l'export, chaque
 # couche = {role, favori, epaisseur}) : mur = 3 murs décalés [rev. intérieur,
 # mur catalogue, rev. extérieur] ; plancher = 2 dalles [rev. supérieur sur
@@ -301,10 +327,13 @@ FAVORIS_OUVERTURES = {
     "porte": None,
 }
 FAVORIS_TOITURE = {}      # repli si l'export n'a pas de champ « favori »
-# Favori Archicad « baie libre » (ouverture sans menuiserie) utilisé pour les
-# ouvertures équivalentes créées dans les couches de revêtement de MUR (v2.26),
-# et « lucarne vide » pour les fenêtres de toit dans les revêtements de TOITURE.
-# Laissez '' pour utiliser le réglage par défaut de l'outil.
+# Favori Archicad « baie libre » (ouverture sans menuiserie) et « lucarne vide ».
+# v2.61 : BAIELIBRE renvoyé à la création des trous dans les revêtements de MUR
+# (sans lui CreateWindows crée une fenêtre vitrée superposée à l'ouvrant, test
+# v2.60), puis réappliqué avec keepFields=KEEP_FIELDS_OUVERTURE pour ne pas
+# écraser width/height/sillHeight. LUCARNEVIDE reste NON envoyé aux trous de
+# lucarnes (v2.48 : un skylight est nativement une ouverture dans la peau de toit,
+# qui force sinon son propre fixMode). Laissez '' pour ne jamais l'envoyer.
 FAVORI_BAIE_LIBRE = "BARACCA-BAIELIBRE"
 FAVORI_LUCARNE_VIDE = "BARACCA-LUCARNEVIDE"
 FAVORIS_CHARPENTE = {}    # idem pour poteaux/poutres
@@ -1373,12 +1402,30 @@ def import_module(data, pick_origin=False):
 
     # --- 1b. Charpentes (nature="charpente") : poteaux + poutre, pas de mur ---
     # Un côté en charpente = cadre ouvert : 2 poteaux aux extrémités (hauteur H)
-    # + 1 poutre sablière en tête (niveau H). Section = charpente.epaisseur,
-    # favori = charpente.favori (outils Poteau / Poutre).
+    # + 1 poutre sablière en tête (niveau H). Section = charpente.epaisseur.
+    # Favoris : poteaux (CreateColumns) = favori de l'élément « poteau » de
+    # l'export (champ « poteau », catalogue « poteaux » du back-office), poutres
+    # sablières (CreateBeams) = favori de la « charpente » (catalogue « poutres »).
+    # v2.62 : PAS de repli du favori poteau sur le favori poutre — un favori
+    # Poutre (outil Beam) est REFUSÉ par Archicad sur un poteau (CreateColumns).
+    ch = module.get("charpente") if isinstance(module.get("charpente"), dict) else {}
+    fav_ch = favori_de(ch, FAVORIS_CHARPENTE, "")
+    po_obj = module.get("poteau") if isinstance(module.get("poteau"), dict) else {}
+    fav_poteau = favori_de(po_obj, FAVORIS_CHARPENTE, "")
+    # Si l'export ne contient pas de vrai poteau (vieux exports : repli sur la
+    # poutre, donc favori identique à celui de la sablière), aucun favori
+    # n'est envoyé aux colonnes.
+    if fav_poteau and fav_ch and fav_poteau == fav_ch:
+        fav_poteau = ""
+    # v2.63 : diagnostic — dit exactement ce que l'export contenait pour le
+    # poteau (utile si aucun favori poteau n'est appliqué : export généré avec
+    # l'ancien front, favori vide dans le back-office, ou favori = favori poutre)
+    print(f"  [diag] élément « poteau » de l'export : "
+          f"{json.dumps(po_obj, ensure_ascii=False) if po_obj else 'ABSENT'}")
+    print(f"  [diag] favori charpente (poutre) « {fav_ch or 'VIDE'} » -> "
+          f"favori poteau retenu pour CreateColumns « {fav_poteau or 'VIDE'} »")
     if charpente_faces:
-        ch = module.get("charpente") if isinstance(module.get("charpente"), dict) else {}
         ep_ch = float(ch.get("epaisseur") or 0.20)
-        fav_ch = favori_de(ch, FAVORIS_CHARPENTE, "")
         cols_data, beams_data = [], []
         # v2.28 : dédoublonnage — à l'intersection de deux modules accolés (côté
         # commun en charpente des DEUX côtés), un seul cadre est créé, posé au
@@ -1473,21 +1520,22 @@ def import_module(data, pick_origin=False):
                                   "height": H_u, "width": ep_ch, "depth": ep_ch})
             # v2.18 : plus de poutre faîtière (doublon au niveau du toit) :
             # le cadre charpente = 2 poteaux + 1 sablière en tête de mur (H).
-        if fav_ch:
+        if fav_poteau:
             for c in cols_data:
-                c["favoriteName"] = fav_ch
+                c["favoriteName"] = fav_poteau
+        if fav_ch:
             for b in beams_data:
                 b["favoriteName"] = fav_ch
         print(f"Création de la charpente ({len(cols_data)} poteau(x), "
               f"{len(beams_data)} poutre(s))…")
-        for cmd, key, data in (("CreateColumns", "columnsData", cols_data),
-                               ("CreateBeams", "beamsData", beams_data)):
+        for cmd, key, data, fav in (("CreateColumns", "columnsData", cols_data, fav_poteau),
+                                    ("CreateBeams", "beamsData", beams_data, fav_ch)):
             try:
                 resp = bridge.tapir_cree(cmd, {key: data})
-                if fav_ch:
+                if fav:
                     for e in resp.get("elements", []):
                         if e.get("elementId") is not None:
-                            fav_a_appliquer.append((e["elementId"], fav_ch, None))
+                            fav_a_appliquer.append((e["elementId"], fav, None))
             except Exception as exc:
                 print(f"  ! {cmd} en échec ({exc}) : charpente non créée.")
 
@@ -1574,18 +1622,31 @@ def import_module(data, pick_origin=False):
             p = tr((cx, cy))
             item = {"coordinates": {"x": p["x"], "y": p["y"], "z": -ep_plancher},
                     "height": ep_plancher, "width": w, "depth": d}
-            fav_ch = str(rev.get("favori") or "").strip()
-            if fav_ch:
-                item["favoriteName"] = fav_ch
-            cols_chant.append((item, fav_ch))
+            # v2.64 : favori de la bande de chant = « Référence Archicad » du
+            # revêtement de chant choisi — un favori POteau de ce nom doit exister
+            # dans le gabarit (ex. BARACCA-PLANCHER-STRATIFIE créé en favori
+            # Poteau ; un nom qui n'existe qu'en composite est refusé par
+            # CreateColumns et la bande est recréée sans favori). À défaut, le
+            # favori poteau de l'export. Géométrie (width/depth/height) explicite
+            # prioritaire à la création ; pas de réapplication après coup (sinon
+            # le favori réinitialiserait la section de la bande).
+            fav_chant = str(rev.get("favori") or "").strip() or fav_poteau
+            if fav_chant:
+                item["favoriteName"] = fav_chant
+            # v2.64 : diagnostic — favori réellement envoyé pour cette bande
+            print(f"  [diag] bande de chant {cf.get('instId')}/{face} "
+                  f"(revêtement « {rev.get('nom') or '?'} », favori revêtement "
+                  f"« {str(rev.get('favori') or '').strip() or 'VIDE'} ») -> favori CreateColumns "
+                  f"« {fav_chant or 'VIDE'} »")
+            cols_chant.append((item, fav_chant))
         if cols_chant:
             print(f"Création de {len(cols_chant)} bande(s) de chant de plancher…")
             try:
                 resp = bridge.tapir_cree("CreateColumns",
                                         {"columnsData": [it for it, _ in cols_chant]})
-                for (it, fav), e in zip(cols_chant, resp.get("elements", [])):
-                    if e.get("elementId") is not None and fav:
-                        fav_a_appliquer.append((e["elementId"], fav, None))
+                # v2.62 : pas de réapplication du favori sur les bandes de chant
+                # après coup (keepFields inconnu pour les colonnes : la
+                # réapplication réinitialiserait la section de la bande).
                 n_ok = sum(1 for e in resp.get("elements", []) if e.get("elementId") is not None)
                 print(f"  -> {n_ok}/{len(cols_chant)} bande(s) créée(s).")
             except Exception as exc:
@@ -2402,16 +2463,23 @@ def import_module(data, pick_origin=False):
                     }
                     if CHAMP_ALLEGE and allege:
                         item_rev[CHAMP_ALLEGE] = allege
-                    # v2.59 : BAIELIBRE envoyé à la création avec sillHeight (idem ouvrant)
+                    # v2.61 : favori BAIELIBRE renvoyé À LA CRÉATION — c'est lui qui
+                    # donne au trou son type « baie libre » (sans favori, CreateWindows
+                    # crée une fenêtre vitrée superposée à l'ouvrant, test v2.60).
+                    # width/height/sillHeight explicites priment sur le favori à la
+                    # création (probe v2.59). Réapplication après coup AVEC
+                    # keepFields=KEEP_FIELDS_OUVERTURE (cas où Tapir aurait refusé le
+                    # favori à la création) pour ne pas écraser les dimensions — la
+                    # réapplication sans keepFields de v2.59 ramenait le trou à 106,5 cm.
                     if FAVORI_BAIE_LIBRE:
                         item_rev["favoriteName"] = FAVORI_BAIE_LIBRE
                     try:
                         resp_rev = bridge.tapir_cree("CreateWindows", {"windowsData": [item_rev]})
                         n_baies += 1
                         el_rev = (resp_rev.get("elements") or [{}])[0]
-                        if (FAVORI_BAIE_LIBRE and el_rev.get("elementId") is not None
-                                and not (CHAMP_ALLEGE and allege)):
-                            fav_a_appliquer.append((el_rev["elementId"], FAVORI_BAIE_LIBRE, None))
+                        if FAVORI_BAIE_LIBRE and el_rev.get("elementId") is not None:
+                            fav_a_appliquer.append((el_rev["elementId"], FAVORI_BAIE_LIBRE,
+                                                    KEEP_FIELDS_OUVERTURE))
                     except Exception as exc:
                         print(f"  ! Baie libre {ouverture.get('id', '?')} non placée "
                               f"dans le revêtement {role_rev} ({face_key}/{uid}) : {exc}")
@@ -2466,7 +2534,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Importe un module Baracca (JSON du configurateur web) "
                     "dans le projet Archicad ouvert.")
-    print("BARACCA-IMPORT v2.59 — Archicad 30 / Tapir >= 2.0 uniquement ; "
+    print("BARACCA-IMPORT v2.64 — Archicad 30 / Tapir >= 2.0 uniquement ; "
           "enveloppe déballée, toutes les instances, murs partagés dédoublonnés "
           "(arrondi cm), miroir Y (Nord correct), murs beg<->end échangés + "
           "Inside (corps vers l'extérieur, face extérieure sur la face opposée "

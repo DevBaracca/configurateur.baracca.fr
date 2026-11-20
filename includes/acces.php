@@ -23,7 +23,7 @@ function archicad_acces_tree(): array
 {
     $sectionsConfig = [
         'modules' => 'Modules', 'isolation' => 'Isolation', 'formes' => 'Formes',
-        'charpentes' => 'Charpentes', 'menuiseries' => 'Ouvrants', 'fenetres_toit' => 'Fenêtres de toit',
+        'poutres' => 'Poutres', 'poteaux' => 'Poteaux', 'menuiseries' => 'Ouvrants', 'fenetres_toit' => 'Fenêtres de toit',
         'murs' => 'Murs', 'planchers' => 'Planchers', 'toitures' => 'Complexes de toiture',
         'surfaces' => 'Revêtements extérieurs', 'interieurs' => 'Revêtements intérieurs',
         'couvertures' => 'Couvertures de toiture', 'rev_plancher' => 'Revêtements de plancher',
@@ -155,6 +155,25 @@ function archicad_bo_login(string $identifier, string $password): bool
 // rubriques cochées (un nœud coché couvre tous ses descendants).
 // ---------------------------------------------------------------------------
 
+// Enfants directs d'un nœud de l'arborescence des accès
+function archicad_acces_children_keys(string $key): array
+{
+    $out = [];
+    $walk = function (array $nodes) use (&$walk, &$out, $key) {
+        foreach ($nodes as $n) {
+            if ((string) $n['key'] === $key) {
+                foreach ($n['children'] as $c) {
+                    $out[] = (string) $c['key'];
+                }
+                return;
+            }
+            $walk($n['children']);
+        }
+    };
+    $walk(archicad_acces_tree());
+    return $out;
+}
+
 function archicad_bo_can(string $key): bool
 {
     $role = archicad_bo_role();
@@ -167,7 +186,37 @@ function archicad_bo_can(string $key): bool
     }
     $acces = array_map('strval', (array) ($staff['acces'] ?? []));
     foreach ($acces as $a) {
-        if (in_array($key, archicad_acces_key_and_descendants($a), true)) {
+        if ($a === $key) {
+            return true;
+        }
+        // Un nœud coché couvre ses descendants, SAUF si l'un de ses enfants
+        // directs est aussi coché : dans ce cas il ne sert que de porte d'entrée
+        // à la rubrique (ex. « Gestion des comptes » + « Utilisateurs » ne donne
+        // PAS « Vendeurs » / « Partenaires » / « Administrateurs »).
+        $enfantCoche = false;
+        foreach (archicad_acces_children_keys($a) as $ck) {
+            if (in_array($ck, $acces, true)) {
+                $enfantCoche = true;
+                break;
+            }
+        }
+        if (!$enfantCoche && in_array($key, archicad_acces_key_and_descendants($a), true)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Vrai si la rubrique elle-même OU l'une de ses sous-rubriques directes est
+// accessible (affichage des entrées de menu de section : un staff n'ayant coché
+// qu'une sous-rubrique voit quand même la rubrique parente)
+function archicad_bo_can_or_children(string $key): bool
+{
+    if (archicad_bo_can($key)) {
+        return true;
+    }
+    foreach (archicad_acces_children_keys($key) as $ck) {
+        if (archicad_bo_can($ck)) {
             return true;
         }
     }
@@ -178,12 +227,20 @@ function archicad_bo_can(string $key): bool
 // personne n'est connecté, affiche « Accès restreint » si le rôle ne convient pas.
 function archicad_bo_require(string $key): void
 {
+    archicad_bo_require_any([$key]);
+}
+
+// Garde-fou « au moins une des clés » (ex. la rubrique « comptes » et ses onglets)
+function archicad_bo_require_any(array $keys): void
+{
     if (!archicad_bo_is_logged_in()) {
         header('Location: index.php');
         exit;
     }
-    if (archicad_bo_can($key)) {
-        return;
+    foreach ($keys as $k) {
+        if (archicad_bo_can((string) $k)) {
+            return;
+        }
     }
     $role = archicad_bo_role();
     $pageTitle = 'Accès restreint';
@@ -368,19 +425,92 @@ function archicad_bo_filter_soumissions(array $soumissions): array
     }));
 }
 
-// Carte interactive des départements (tuiles cliquables = cases à cocher)
+// Carte interactive des départements de France métropolitaine : vraie carte SVG
+// (assets/cartes/departements-france.svg, généré depuis le GeoJSON simplifié
+// gregoiredavid/france-geojson — voir TEST/gen_carte_dept.py), sans les DOM-TOM.
+// Chaque département est un <g class="dept-g" data-dept=".."> ; un clic bascule la
+// case à cocher cachée associée (name="departements[]") qui est soumise au formulaire.
+// Les codes 97x (outre-mer) n'ont pas de tuile sur la carte mais leur case reste
+// présente (cachée) : une zone outre-mer déjà attribuée n'est pas perdue à l'enregistrement.
 function archicad_departements_carte(array $selectionnes): void
 {
     $sel = array_map('strval', $selectionnes);
-    $tile = 38; // px
-    $cols = 15;
-    $rows = 14;
-    echo '<div class="dept-carte" style="width:' . ($cols * $tile) . 'px;height:' . ($rows * $tile) . 'px" role="group" aria-label="Carte des départements">';
-    foreach (archicad_departements() as $code => [$x, $y, $nom]) {
-        $checked = in_array((string) $code, $sel, true);
-        echo '<label class="dept-tile" style="left:' . ($x * $tile) . 'px;top:' . ($y * $tile) . 'px" title="' . htmlspecialchars($nom . ' (' . $code . ')') . '">'
-            . '<input type="checkbox" name="departements[]" value="' . htmlspecialchars((string) $code) . '"' . ($checked ? ' checked' : '') . '>'
-            . '<span>' . htmlspecialchars((string) $code) . '</span></label>';
+    // Départements déjà attribués à un compte staff (vendeur/partenaire) :
+    // affichés en rouge clair, sauf s'ils appartiennent à la fiche en cours
+    // d'édition ($sel : ils restent en vert comme avant)
+    $attribues = [];
+    foreach (archicad_load_users() as $u) {
+        if (!in_array(archicad_user_role($u), archicad_bo_roles(), true)) {
+            continue;
+        }
+        foreach ((array) ($u['departements'] ?? []) as $d) {
+            $attribues[(string) $d] = true;
+        }
+    }
+    $svgFile = __DIR__ . '/../assets/cartes/departements-france.svg';
+    $svg = is_file($svgFile) ? (string) file_get_contents($svgFile) : '';
+    // état injecté dans le SVG : classe "sel" (sélectionné, vert) ou "pris"
+    // (déjà attribué à un autre compte, rouge clair) + data-pris pour le JS
+    if ($svg !== '') {
+        $svg = preg_replace_callback(
+            '/<g class="dept-g" data-dept="([^"]+)">/',
+            static function ($m) use ($sel, $attribues) {
+                $code = $m[1];
+                $pris = isset($attribues[$code]);
+                $cls = 'dept-g';
+                if (in_array($code, $sel, true)) {
+                    $cls .= ' sel';
+                } elseif ($pris) {
+                    $cls .= ' pris';
+                }
+                return '<g class="' . $cls . '" data-dept="' . $code . '"'
+                    . ($pris ? ' data-pris="1"' : '') . '>';
+            },
+            $svg
+        );
+    }
+    echo '<div class="dept-carte-svg" role="group" aria-label="Carte des départements de France métropolitaine">';
+    echo $svg !== '' ? $svg : '<p class="admin-hint">Carte indisponible (assets/cartes/departements-france.svg).</p>';
+    echo '<p class="admin-hint dept-legend">'
+        . '<span class="dept-swatch dept-swatch-sel"></span> attribué à cette fiche'
+        . ' &nbsp;·&nbsp; <span class="dept-swatch dept-swatch-pris"></span> déjà attribué à un autre compte'
+        . '</p>';
+    // cases à cocher (soumission du formulaire) : une par département, masquées visuellement
+    foreach (archicad_departements() as $code => $def) {
+        $checked = in_array((string) $code, $sel, true) ? ' checked' : '';
+        echo '<input type="checkbox" class="dept-check" data-dept="' . htmlspecialchars((string) $code) . '" name="departements[]" value="' . htmlspecialchars((string) $code) . '"' . $checked . '>';
     }
     echo '</div>';
+    // câblage des clics sur la carte -> cases à cocher (et état visuel "sel")
+    echo '<script>
+    (function () {
+      var root = document.currentScript && document.currentScript.previousElementSibling;
+      if (!root || !root.classList || !root.classList.contains("dept-carte-svg")) return;
+      var cbOf = function (g) {
+        return root.querySelector(\'input.dept-check[data-dept="\' + g.getAttribute("data-dept") + \'"]\');
+      };
+      root.querySelectorAll(".dept-g[data-dept]").forEach(function (g) {
+        g.setAttribute("tabindex", "0");
+        var cb = cbOf(g);
+        if (cb) g.setAttribute("aria-checked", cb.checked ? "true" : "false");
+      });
+      root.addEventListener("click", function (e) {
+        var g = e.target.closest ? e.target.closest(".dept-g[data-dept]") : null;
+        if (!g || !root.contains(g)) return;
+        var cb = cbOf(g);
+        if (!cb) return;
+        cb.checked = !cb.checked;
+        g.classList.toggle("sel", cb.checked);
+        g.classList.toggle("pris", g.getAttribute("data-pris") === "1" && !cb.checked);
+        g.setAttribute("aria-checked", cb.checked ? "true" : "false");
+      });
+      root.addEventListener("keydown", function (e) {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        var g = e.target.closest ? e.target.closest(".dept-g[data-dept]") : null;
+        if (!g || !root.contains(g)) return;
+        e.preventDefault();
+        g.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+    })();
+    </script>';
 }

@@ -170,6 +170,15 @@ function archicad_catalogue_defaults(string $kind): array
             return [
                 ['id' => 'charpente-tradi', 'nom' => 'Charpente traditionnelle', 'epaisseur' => 0.20, 'defaut' => true, 'image' => '', 'rgb' => [140, 107, 89], 'favori' => '', 'tarif' => 0, 'created' => $today],
             ];
+        case 'poutres':
+        case 'poteaux':
+            // Poutres (sablières, outil Poutre) et poteaux (outil Poteau) :
+            // onglets séparés du back-office, UNE seule référence Archicad
+            // par élément (champ « favori »)
+            $isPoteau = $kind === 'poteaux';
+            return [
+                ['id' => $isPoteau ? 'poteau-tradi' : 'poutre-tradi', 'nom' => $isPoteau ? 'Poteau traditionnel' : 'Poutre traditionnelle', 'epaisseur' => 0.20, 'defaut' => true, 'image' => '', 'rgb' => [140, 107, 89], 'favori' => '', 'tarif' => 0, 'created' => $today],
+            ];
         case 'isolation':
             // Isolation : type de mur, de plancher et de toiture (références
             // vers les catalogues murs / planchers / toitures), choisie côté
@@ -367,7 +376,7 @@ function archicad_catalogue_forme_geometries(): array
 // rev_plancher)
 function archicad_catalogue_defaultable_kinds(): array
 {
-    return ['modules', 'isolation', 'formes', 'charpentes', 'autonomie', 'amenagements', 'surfaces', 'interieurs', 'couvertures', 'rev_plancher'];
+    return ['modules', 'isolation', 'formes', 'charpentes', 'poutres', 'poteaux', 'autonomie', 'amenagements', 'surfaces', 'interieurs', 'couvertures', 'rev_plancher'];
 }
 
 /**
@@ -580,7 +589,7 @@ function archicad_load_catalogue(string $kind): array
             archicad_save_catalogue('formes', $items);
         }
     }
-    if ($kind === 'charpentes') {
+    if (in_array($kind, ['charpentes', 'poutres', 'poteaux'], true)) {
         foreach ($items as $i => $item) {
             if (empty($item['epaisseur'])) {
                 $items[$i]['epaisseur'] = 0.20;
@@ -738,7 +747,7 @@ function archicad_catalogue_delete(string $kind, string $id): bool
  */
 function archicad_marge_kinds(): array
 {
-    return ['charpentes', 'murs', 'planchers', 'toitures', 'menuiseries', 'fenetres_toit', 'systemes_aut', 'equipements', 'surfaces', 'interieurs', 'couvertures', 'rev_plancher'];
+    return ['charpentes', 'poutres', 'poteaux', 'murs', 'planchers', 'toitures', 'menuiseries', 'fenetres_toit', 'systemes_aut', 'equipements', 'surfaces', 'interieurs', 'couvertures', 'rev_plancher'];
 }
 
 function archicad_marges_file(): string

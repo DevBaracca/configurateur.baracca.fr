@@ -7,6 +7,9 @@
  */
 require_once __DIR__ . '/../includes/auth.php';
 
+// Réponses toujours en JSON pur (un warning PHP ne doit pas corrompre le payload)
+ini_set('display_errors', '0');
+
 header('Content-Type: application/json; charset=utf-8');
 
 // Compte client, ou session administrateur (id dédié « admin:<username> »)

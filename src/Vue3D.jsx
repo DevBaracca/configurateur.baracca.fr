@@ -16,6 +16,7 @@ import {
 
 const css = (rgb, fb) => `rgb(${rgb?.[0] ?? fb[0]},${rgb?.[1] ?? fb[1]},${rgb?.[2] ?? fb[2]})`;
 const rad = (deg) => (deg * Math.PI) / 180;
+const TEX_MUR = 2; // échelle réelle des textures murales : répétition tous les 2 m (comme la toiture)
 
 /* Normale unitaire « vers le haut » d'un polygone de versant */
 function upNormal(poly) {
@@ -164,6 +165,49 @@ function buildScene(d, env) {
     jointMur[inst.id] = { nord: null, sud: null, est: null, ouest: null };
     jointOver[inst.id] = { nord: 0, sud: 0, est: 0, ouest: 0 };
   }
+  // Mur commun entre deux modules accolés (écart = épaisseur du mur, murs actifs
+  // des deux côtés) : dessiné UNE SEULE FOIS, par le module propriétaire de
+  // l'arête (le premier dans insts, comme eachEdge en plan/export) — sinon les
+  // deux murs se superposent. wallMerge : ouvertures du voisin à reporter sur
+  // le mur du propriétaire (décalées dans son repère).
+  const instIdx = {};
+  insts.forEach((i, k) => { instIdx[i.id] = k; });
+  const wallSkip = {};
+  const wallMerge = {};
+  for (const { inst } of dimsList) wallSkip[inst.id] = { nord: false, sud: false, est: false, ouest: false };
+  const markJointWall = (A, faceA, B, faceB, gap) => {
+    const aActif = A.inst.murs?.[faceA]?.actif !== false, bActif = B.inst.murs?.[faceB]?.actif !== false;
+    const aVis = A.dm.visibilite?.murs !== false, bVis = B.dm.visibilite?.murs !== false;
+    if (!(aActif && bActif && aVis && bVis)) return; // charpente d'un côté : le mur de l'autre suffit
+    if (gap > ep + 0.02) return; // murs non confondus (écart > épaisseur du mur) : on garde les deux
+    const ownFirst = instIdx[A.inst.id] < instIdx[B.inst.id];
+    const owner = ownFirst ? A : B, ownFace = ownFirst ? faceA : faceB;
+    const loser = ownFirst ? B : A, loseFace = ownFirst ? faceB : faceA;
+    wallSkip[loser.inst.id][loseFace] = true;
+    const horiz = ownFace === "nord" || ownFace === "sud";
+    wallMerge[owner.inst.id + ":" + ownFace] = { nb: loser.inst, nface: loseFace, off: horiz ? loser.inst.x - owner.inst.x : loser.inst.y - owner.inst.y };
+  };
+  // Anti-doublon des coins : un carré de coin (ep x ep) n'est prolongé qu'une seule
+  // fois — la première prolongation arrivée le couvre (avec le revêtement sur sa
+  // tranche), les suivantes sont annulées ou réduites pour se rejoindre à l'axe du
+  // joint sans chevauchement. Sinon deux murs prolongés se superposent dans le même
+  // carré (angle de murs, jonction entre deux modules) et le revêtement apparaît en double.
+  const r100 = (v) => Math.round(v * 100) / 100;
+  const cornerClaim = new Map(); // clé du carré -> { xW, xE, zN, zS } : couverture déjà prise par côté
+  const claimCorner = (key, axis, side, p) => {
+    if (p <= 1e-6) return 0;
+    let c = cornerClaim.get(key);
+    if (!c) { c = { xW: 0, xE: 0, zN: 0, zS: 0 }; cornerClaim.set(key, c); }
+    // déjà couvert par un mur perpendiculaire (autre axe) ou du même côté : rien
+    if (axis === "x" ? (c.zN + c.zS > 0) : (c.xW + c.xE > 0)) return 0;
+    if (c[axis + side] > 0) return 0;
+    // même axe, côté opposé : on se rejoint à l'axe du joint sans chevaucher
+    const opp = axis === "x" ? c[side === "W" ? "xE" : "xW"] : c[side === "N" ? "zS" : "zN"];
+    const allowed = Math.min(p, Math.max(0, ep - opp));
+    if (allowed <= 1e-6) return 0;
+    c[axis + side] += allowed;
+    return allowed;
+  };
   // Noue au joint nord/sud entre deux modules : point où les deux plans de versants
   // (sud du module nord, pente p2, cote Hr+δ2 ; nord du module sud, pente p1, cote
   // Hr+δ1) se coupent au-dessus du mur commun. d = distance depuis la ligne directrice
@@ -192,13 +236,13 @@ function buildScene(d, env) {
       const gapW = A.inst.x - (B.inst.x + B.dm.longueur);
       const gapS = B.inst.y - (A.inst.y + A.dm.largeur);
       const gapN = A.inst.y - (B.inst.y + B.dm.largeur);
-      if (gapE > epsC && gapE <= epMax && ovY) { over[A.inst.id].est = ep; over[B.inst.id].ouest = 0; shared[A.inst.id].est = shared[B.inst.id].ouest = true; jointOver[A.inst.id].est = ep / 2; jointOver[B.inst.id].ouest = ep / 2; const jm = (A.inst.murs?.est?.actif !== false) || (B.inst.murs?.ouest?.actif !== false); jointMur[A.inst.id].est = jm; jointMur[B.inst.id].ouest = jm; }
-      if (gapW > epsC && gapW <= epMax && ovY) { over[B.inst.id].est = ep; over[A.inst.id].ouest = 0; shared[B.inst.id].est = shared[A.inst.id].ouest = true; jointOver[B.inst.id].est = ep / 2; jointOver[A.inst.id].ouest = ep / 2; const jm = (B.inst.murs?.est?.actif !== false) || (A.inst.murs?.ouest?.actif !== false); jointMur[B.inst.id].est = jm; jointMur[A.inst.id].ouest = jm; }
+      if (gapE > epsC && gapE <= epMax && ovY) { over[A.inst.id].est = ep; over[B.inst.id].ouest = 0; shared[A.inst.id].est = shared[B.inst.id].ouest = true; jointOver[A.inst.id].est = ep / 2; jointOver[B.inst.id].ouest = ep / 2; const jm = (A.inst.murs?.est?.actif !== false) || (B.inst.murs?.ouest?.actif !== false); jointMur[A.inst.id].est = jm; jointMur[B.inst.id].ouest = jm; markJointWall(A, "est", B, "ouest", gapE); }
+      if (gapW > epsC && gapW <= epMax && ovY) { over[B.inst.id].est = ep; over[A.inst.id].ouest = 0; shared[B.inst.id].est = shared[A.inst.id].ouest = true; jointOver[B.inst.id].est = ep / 2; jointOver[A.inst.id].ouest = ep / 2; const jm = (B.inst.murs?.est?.actif !== false) || (A.inst.murs?.ouest?.actif !== false); jointMur[B.inst.id].est = jm; jointMur[A.inst.id].ouest = jm; markJointWall(B, "est", A, "ouest", gapW); }
       // Jonction sud/nord : noue — chaque versant est prolongé jusqu'au point où les
       // deux plans de couverture se coupent au-dessus du mur commun (pas forcément le
       // milieu en shed) -> les toitures se rejoignent sans marche, en bas de pente aussi
-      if (gapS > epsC && gapS <= epMax && ovX) { const d = noueSN(gapS); over[A.inst.id].sud = d; over[B.inst.id].nord = gapS - d; jointOver[A.inst.id].sud = d; jointOver[B.inst.id].nord = gapS - d; shared[A.inst.id].sud = shared[B.inst.id].nord = true; const jm = (A.inst.murs?.sud?.actif !== false) || (B.inst.murs?.nord?.actif !== false); jointMur[A.inst.id].sud = jm; jointMur[B.inst.id].nord = jm; }
-      if (gapN > epsC && gapN <= epMax && ovX) { const d = noueSN(gapN); over[B.inst.id].sud = d; over[A.inst.id].nord = gapN - d; jointOver[B.inst.id].sud = d; jointOver[A.inst.id].nord = gapN - d; shared[B.inst.id].sud = shared[A.inst.id].nord = true; const jm = (B.inst.murs?.sud?.actif !== false) || (A.inst.murs?.nord?.actif !== false); jointMur[B.inst.id].sud = jm; jointMur[A.inst.id].nord = jm; }
+      if (gapS > epsC && gapS <= epMax && ovX) { const d = noueSN(gapS); over[A.inst.id].sud = d; over[B.inst.id].nord = gapS - d; jointOver[A.inst.id].sud = d; jointOver[B.inst.id].nord = gapS - d; shared[A.inst.id].sud = shared[B.inst.id].nord = true; const jm = (A.inst.murs?.sud?.actif !== false) || (B.inst.murs?.nord?.actif !== false); jointMur[A.inst.id].sud = jm; jointMur[B.inst.id].nord = jm; markJointWall(A, "sud", B, "nord", gapS); }
+      if (gapN > epsC && gapN <= epMax && ovX) { const d = noueSN(gapN); over[B.inst.id].sud = d; over[A.inst.id].nord = gapN - d; jointOver[B.inst.id].sud = d; jointOver[A.inst.id].nord = gapN - d; shared[B.inst.id].sud = shared[A.inst.id].nord = true; const jm = (B.inst.murs?.sud?.actif !== false) || (A.inst.murs?.nord?.actif !== false); jointMur[B.inst.id].sud = jm; jointMur[A.inst.id].nord = jm; markJointWall(B, "sud", A, "nord", gapN); }
     }
   }
   // En monopente, le nord est le haut du toit (mur nord montant jusqu'au toit) :
@@ -340,6 +384,7 @@ function buildScene(d, env) {
     for (const face of (vis.murs ? ["nord", "est", "sud", "ouest"] : [])) {
       const f = inst.murs?.[face] ?? { actif: true, ouvertures: [] };
       if (!f.actif) continue; // charpente : pas de mur
+      if (wallSkip[inst.id]?.[face]) continue; // mur commun : dessiné une seule fois, par le module propriétaire de l'arête
       // revêtements de cette face : EXTÉRIEUR (face externe du mur) et INTÉRIEUR (face interne)
       const wItem = surfItemOf(inst, face);
       const iItem = intItemOf(inst, face);
@@ -357,7 +402,15 @@ function buildScene(d, env) {
         : face === "ouest" ? [matInner, matOuter, matSide, matSide, matSide, matSide]
         : [matOuter, matInner, matSide, matSide, matSide, matSide];
       const Lface = face === "nord" || face === "sud" ? dm.longueur : dm.largeur;
-      const ops = [...(f.ouvertures || [])].sort((a, c) => a.position - c.position);
+      // mur commun : les ouvertures du module voisin (côté non dessiné) sont
+      // reportées sur ce mur, décalées dans le repère de ce module
+      const wmerge = wallMerge[inst.id + ":" + face];
+      const extra = wmerge
+        ? (wmerge.nb.murs?.[wmerge.nface]?.ouvertures || [])
+            .map((o) => ({ ...o, position: o.position + wmerge.off }))
+            .filter((o) => o.position + o.largeur > 1e-6 && o.position < Lface - 1e-6)
+        : [];
+      const ops = [...(f.ouvertures || []), ...extra].sort((a, c) => a.position - c.position);
       const segs = [];
       let cursor = 0;
       for (const o of ops) {
@@ -378,14 +431,21 @@ function buildScene(d, env) {
       // à l'export Archicad. S'applique aux 4 faces (pignons est/ouest compris).
       if (segs.length) {
         const jm = jointMur[inst.id] || {};
-        const pW = inst.murs?.ouest?.actif !== false ? ep : (sh0.ouest ? (jm.ouest === true ? ep : ep / 2) : 0);
-        const pE = inst.murs?.est?.actif !== false ? ep : (sh0.est ? (jm.est === true ? ep : ep / 2) : 0);
-        const pN = inst.murs?.nord?.actif !== false ? ep : (sh0.nord ? (jm.nord === true ? ep : ep / 2) : 0);
-        const pS = inst.murs?.sud?.actif !== false ? ep : (sh0.sud ? (jm.sud === true ? ep : ep / 2) : 0);
+        let pW = inst.murs?.ouest?.actif !== false ? ep : (sh0.ouest ? (jm.ouest === true ? ep : ep / 2) : 0);
+        let pE = inst.murs?.est?.actif !== false ? ep : (sh0.est ? (jm.est === true ? ep : ep / 2) : 0);
+        let pN = inst.murs?.nord?.actif !== false ? ep : (sh0.nord ? (jm.nord === true ? ep : ep / 2) : 0);
+        let pS = inst.murs?.sud?.actif !== false ? ep : (sh0.sud ? (jm.sud === true ? ep : ep / 2) : 0);
+        // chaque carré de coin n'est prolongé qu'une fois (voir claimCorner)
         if (face === "nord" || face === "sud") {
+          const zc = face === "nord" ? Z0 - ep : Z1;
+          pW = claimCorner(`c${r100(X0 - ep)},${r100(zc)}`, "x", "E", pW);
+          pE = claimCorner(`c${r100(X1)},${r100(zc)}`, "x", "W", pE);
           if (pW > 0) { segs[0][0] -= pW; segs[0][4] = true; } // coin ouest, tranche -x (index 1)
           if (pE > 0) { segs[segs.length - 1][1] += pE; segs[segs.length - 1][5] = true; } // coin est, tranche +x (index 0)
         } else {
+          const xc = face === "ouest" ? X0 - ep : X1;
+          pN = claimCorner(`c${r100(xc)},${r100(Z0 - ep)}`, "z", "S", pN);
+          pS = claimCorner(`c${r100(xc)},${r100(Z1)}`, "z", "N", pS);
           if (pN > 0) { segs[0][0] -= pN; segs[0][6] = true; } // coin nord, tranche -z (index 5)
           if (pS > 0) { segs[segs.length - 1][1] += pS; segs[segs.length - 1][7] = true; } // coin sud, tranche +z (index 4)
         }
@@ -408,11 +468,29 @@ function buildScene(d, env) {
           mesh.position.set(X0 - ep / 2, (y0 + y1) / 2, Z0 + (u0 + u1) / 2);
         else mesh = new THREE.Mesh(new THREE.BoxGeometry(ep, hSeg, wSeg), matsSeg),
           mesh.position.set(X1 + ep / 2, (y0 + y1) / 2, Z0 + (u0 + u1) / 2);
+        // Tranche d'un coin prolongé : UV à l'échelle réelle (texture répétée tous les
+        // 2 m selon les coordonnées monde, comme la toiture) — sinon les UV 0..1 de la
+        // BoxGeometry écrasent l'image sur la largeur de la tranche (ep) et la déforment.
+        if (coinO || coinE || coinN || coinS) {
+          const pos = mesh.geometry.attributes.position, uv = mesh.geometry.attributes.uv;
+          const mx = mesh.position.x, my = mesh.position.y, mz = mesh.position.z;
+          // BoxGeometry : faces dans l'ordre [+x, -x, +y, -y, +z, -z], 4 sommets chacune
+          const tranches = face === "nord" || face === "sud"
+            ? [...(coinO ? [1] : []), ...(coinE ? [0] : [])]   // tranches -x / +x
+            : [...(coinN ? [5] : []), ...(coinS ? [4] : [])];  // tranches -z / +z
+          for (const fi of tranches) {
+            for (let i = fi * 4; i < fi * 4 + 4; i++) {
+              const wx = pos.getX(i) + mx, wy = pos.getY(i) + my, wz = pos.getZ(i) + mz;
+              if (face === "nord" || face === "sud") uv.setXY(i, wz / TEX_MUR, wy / TEX_MUR);
+              else uv.setXY(i, wx / TEX_MUR, wy / TEX_MUR);
+            }
+          }
+        }
         scene.add(mesh);
       }
 
       // ouvertures : panneau sombre posé sur la face extérieure du mur, sur l'allège
-      for (const o of f.ouvertures || []) {
+      for (const o of ops) {
         const m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), o.type === "porte" ? ouvMatPorte : ouvMatFen);
         const yOuv = (o.allege ?? 0) + o.hauteur / 2;
         if (face === "nord") { m.scale.set(o.largeur, o.hauteur, 0.05); m.position.set(X0 + o.position + o.largeur / 2, yOuv, Z0 - ep - 0.02); }
@@ -617,10 +695,13 @@ export default function Vue3D({ d, env, w, h }) {
 
     const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 500);
     // Vue par défaut plus large (module entièrement visible) et plus rasante (axonométrie proche du sol)
-    camera.position.set(span * 1.25, Math.max(span * 0.42, maxTop * 0.85), span * 1.6);
+    const target = new THREE.Vector3(0, maxTop / 2, 0);
+    const camPos = new THREE.Vector3(span * 1.25, Math.max(span * 0.42, maxTop * 0.85), span * 1.6);
+    // Zoom réduit de 50% : on double la distance caméra-cible (le module paraît deux fois plus petit)
+    camera.position.copy(target).add(new THREE.Vector3().subVectors(camPos, target).multiplyScalar(2));
 
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, maxTop / 2, 0);
+    controls.target.copy(target);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.update();
